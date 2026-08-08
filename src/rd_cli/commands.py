@@ -6,13 +6,63 @@ client (which may be ``None``). ``cli.py`` wires these to argparse subcommands.
 from __future__ import annotations
 
 import mimetypes
+import os
 import sys
+import webbrowser
 from pathlib import Path
 from typing import Any
 
 from . import config, output, sync
 from .client import RaindropClient
 from .pinboard import PinboardClient
+
+# -- confirmation -------------------------------------------------------------
+
+
+def _assume_yes(args: Any) -> bool:
+    """True when the user has pre-agreed, via ``--yes`` or ``RD_ASSUME_YES``.
+
+    The env var exists for cron and scripts, which cannot answer a prompt but
+    also should not have to thread ``--yes`` through every call site.
+    """
+    if getattr(args, "yes", False):
+        return True
+    return os.environ.get("RD_ASSUME_YES", "").strip().lower() in ("1", "true", "yes")
+
+
+def _confirmed(args: Any, question: str) -> bool:
+    """Gate a destructive operation behind a confirmation.
+
+    ``--dry-run`` passes straight through: it performs no writes, and its whole
+    point is to show what would happen without an interrogation first.
+    """
+    if getattr(args, "dry_run", False):
+        return True
+    return output.confirm(question, assume_yes=_assume_yes(args))
+
+
+def _scope_count(client: RaindropClient, collection: int, search: str, nested: bool):
+    """Best-effort count of the raindrops a scope operation would touch.
+
+    The list endpoint is not documented to return a total, so treat a missing
+    ``count`` as unknown and let the caller word the prompt without a number
+    rather than assert a wrong one.
+    """
+    try:
+        envelope = client.get_raindrops(
+            collection, search=search, nested=nested, perpage=1
+        )
+    except Exception:
+        return None
+    count = envelope.get("count") if isinstance(envelope, dict) else None
+    return count if isinstance(count, int) else None
+
+
+def _scope_phrase(count, noun: str = "raindrop") -> str:
+    if count is None:
+        return f"every {noun}"
+    return f"{count} {noun}" + ("" if count == 1 else "s")
+
 
 # -- raindrops ----------------------------------------------------------------
 
@@ -57,6 +107,50 @@ def cmd_view(client: RaindropClient, args: Any) -> int:
         return 1
     print(output.format_raindrop_detail(item))
     return 0
+
+
+def cmd_open(client: RaindropClient, args: Any) -> int:
+    """Open one or more raindrops in the browser (or print their URLs)."""
+    resolved: list[dict] = []
+    failed = False
+    for rid in args.ids:
+        item = client.get_raindrop(rid)
+        if not item:
+            output.error(f"raindrop {rid} not found")
+            failed = True
+            continue
+        if args.cache:
+            url = client.get_permanent_copy_url(rid)
+            if not url:
+                output.error(
+                    f"raindrop {rid} has no permanent copy "
+                    "(the archive is a PRO feature, and only some links are stored)"
+                )
+                failed = True
+                continue
+        else:
+            url = item.get("link")
+            if not url:
+                output.error(f"raindrop {rid} has no link")
+                failed = True
+                continue
+        resolved.append({"id": rid, "url": url, "title": item.get("title") or ""})
+
+    if args.json:
+        output.emit_json(resolved)
+    elif args.print_url:
+        for entry in resolved:
+            print(entry["url"])
+
+    if not args.print_url:
+        for entry in resolved:
+            # Failing to launch is not fatal: on a headless box there may be no
+            # browser at all, and the URL is still worth surfacing.
+            if not webbrowser.open(entry["url"]):
+                output.error(f"could not launch a browser for {entry['url']}")
+                failed = True
+
+    return 1 if failed else 0
 
 
 def cmd_add(client: RaindropClient, args: Any) -> int:
@@ -134,6 +228,18 @@ def cmd_rm(client: RaindropClient, args: Any) -> int:
     # by search) in one batch call. The batch endpoint's path is a scope, so a
     # real source collection is required (0 is unsupported for remove-many).
     if getattr(args, "from_collection", None) is not None:
+        count = _scope_count(
+            client, args.from_collection, args.search or "", args.nested
+        )
+        where = f"collection {args.from_collection}"
+        if args.search:
+            where += f" matching {args.search!r}"
+        if not _confirmed(
+            args,
+            f"Remove {_scope_phrase(count)} in {where}?",
+        ):
+            output.error("aborted")
+            return 1
         n = client.delete_raindrops(
             args.from_collection, search=args.search or "", nested=args.nested
         )
@@ -146,7 +252,14 @@ def cmd_rm(client: RaindropClient, args: Any) -> int:
         return 0
 
     # Id mode: loop the single-item endpoint (always correct regardless of which
-    # collection each raindrop lives in).
+    # collection each raindrop lives in). Only the permanent path asks: a plain
+    # remove lands in Trash and is undoable, so a prompt there is just noise.
+    if args.permanent and not _confirmed(
+        args,
+        f"Permanently delete {len(args.ids)} raindrop(s)? This cannot be undone.",
+    ):
+        output.error("aborted")
+        return 1
     results = {
         rid: client.delete_raindrop(rid, permanent=args.permanent) for rid in args.ids
     }
@@ -179,6 +292,18 @@ def cmd_mv(client: RaindropClient, args: Any) -> int:
         return 1
     # Scope mode: move everything in a source collection (optional search) at once.
     if getattr(args, "from_collection", None) is not None:
+        count = _scope_count(
+            client, args.from_collection, args.search or "", args.nested
+        )
+        where = f"collection {args.from_collection}"
+        if args.search:
+            where += f" matching {args.search!r}"
+        if not _confirmed(
+            args,
+            f"Move {_scope_phrase(count)} from {where} into collection {dest}?",
+        ):
+            output.error("aborted")
+            return 1
         n = client.update_raindrops(
             args.from_collection,
             search=args.search or "",
@@ -219,6 +344,20 @@ def cmd_tag(client: RaindropClient, args: Any) -> int:
             )
             return 1
         new_tags: list[str] = [] if args.clear else add
+        count = _scope_count(
+            client, args.from_collection, args.search or "", args.nested
+        )
+        where = f"collection {args.from_collection}"
+        if args.search:
+            where += f" matching {args.search!r}"
+        # Appending tags is additive and cheap to undo; --clear destroys every
+        # tag in scope, so only that branch asks.
+        if args.clear and not _confirmed(
+            args,
+            f"Clear all tags from {_scope_phrase(count)} in {where}?",
+        ):
+            output.error("aborted")
+            return 1
         n = client.update_raindrops(
             args.from_collection,
             search=args.search or "",
@@ -312,6 +451,14 @@ def cmd_collections_edit(client: RaindropClient, args: Any) -> int:
 
 
 def cmd_collections_rm(client: RaindropClient, args: Any) -> int:
+    # Deleting a collection takes its raindrops with it (they go to Trash), so
+    # the blast radius is everything inside, not the one id typed.
+    if not _confirmed(
+        args,
+        f"Delete collection {args.id} and move its raindrops to Trash?",
+    ):
+        output.error("aborted")
+        return 1
     ok = client.delete_collection(args.id)
     if args.json:
         output.emit_json({"result": ok})
@@ -342,6 +489,12 @@ def cmd_collections_clean(client: RaindropClient, args: Any) -> int:
 
 
 def cmd_collections_empty_trash(client: RaindropClient, args: Any) -> int:
+    if not _confirmed(
+        args,
+        "Permanently delete everything in Trash? This cannot be undone.",
+    ):
+        output.error("aborted")
+        return 1
     ok = client.empty_trash()
     if args.json:
         output.emit_json({"result": ok})
@@ -417,6 +570,17 @@ def cmd_tags_merge(client: RaindropClient, args: Any) -> int:
 
 
 def cmd_tags_rm(client: RaindropClient, args: Any) -> int:
+    # Strips the tag from every raindrop carrying it; there is no undo and no
+    # way to enumerate what was touched afterwards.
+    scope = (
+        f" in collection {args.collection}"
+        if args.collection is not None
+        else " everywhere"
+    )
+    listed = ", ".join("#" + t for t in args.tags)
+    if not _confirmed(args, f"Delete {listed}{scope}? This cannot be undone."):
+        output.error("aborted")
+        return 1
     ok = client.delete_tags(args.tags, args.collection)
     if args.json:
         output.emit_json({"result": ok})

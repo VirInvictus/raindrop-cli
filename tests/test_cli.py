@@ -170,10 +170,15 @@ def test_mv_id_mode_loops_single_updates(run):
 
 
 def test_mv_scope_mode_uses_batch(run):
-    code, out, stub = run(["mv", "42", "--from", "5"], update_raindrops=2)
-    assert stub.calls[0][0] == "update_raindrops"
-    assert stub.calls[0][1][0] == 5  # path scope = source
-    assert stub.calls[0][2]["move_to"] == 42
+    # -y because scope mode now confirms first; the count read precedes the write.
+    code, out, stub = run(
+        ["mv", "42", "--from", "5", "-y"],
+        update_raindrops=2,
+        get_raindrops={"count": 2, "items": []},
+    )
+    batch = [c for c in stub.calls if c[0] == "update_raindrops"][0]
+    assert batch[1][0] == 5  # path scope = source
+    assert batch[2]["move_to"] == 42
 
 
 def test_mv_no_ids_no_scope_errors(run):
@@ -187,14 +192,152 @@ def test_rm_multi_ids(run):
 
 
 def test_rm_permanent_flag(run):
-    code, out, stub = run(["rm", "1", "--permanent"], delete_raindrop=True)
+    code, out, stub = run(["rm", "1", "--permanent", "-y"], delete_raindrop=True)
     assert stub.calls[0][2]["permanent"] is True
 
 
 def test_rm_scope_mode(run):
-    code, out, stub = run(["rm", "--from", "5", "-s", "x"], delete_raindrops=4)
-    assert stub.calls[0][0] == "delete_raindrops"
-    assert stub.calls[0][1][0] == 5
+    code, out, stub = run(
+        ["rm", "--from", "5", "-s", "x", "-y"],
+        delete_raindrops=4,
+        get_raindrops={"count": 4, "items": []},
+    )
+    batch = [c for c in stub.calls if c[0] == "delete_raindrops"][0]
+    assert batch[1][0] == 5
+
+
+# -- confirmation --------------------------------------------------------------
+
+
+def test_rm_scope_aborts_without_confirmation(run):
+    """A non-interactive stdin refuses rather than prompting, so nothing is written."""
+    code, out, stub = run(
+        ["rm", "--from", "5"],
+        delete_raindrops=4,
+        get_raindrops={"count": 4, "items": []},
+    )
+    assert code == 1
+    assert not [c for c in stub.calls if c[0] == "delete_raindrops"]
+
+
+def test_rm_permanent_aborts_without_confirmation(run):
+    code, out, stub = run(["rm", "1", "--permanent"], delete_raindrop=True)
+    assert code == 1
+    assert not [c for c in stub.calls if c[0] == "delete_raindrop"]
+
+
+def test_rm_to_trash_needs_no_confirmation(run):
+    """Trash is recoverable, so the common case stays prompt-free."""
+    code, out, stub = run(["rm", "1", "2"], delete_raindrop=True)
+    assert code == 0
+    assert len([c for c in stub.calls if c[0] == "delete_raindrop"]) == 2
+
+
+def test_assume_yes_env_confirms(run, monkeypatch):
+    monkeypatch.setenv("RD_ASSUME_YES", "1")
+    code, out, stub = run(["rm", "1", "--permanent"], delete_raindrop=True)
+    assert code == 0
+    assert stub.calls[0][2]["permanent"] is True
+
+
+def test_dry_run_skips_the_prompt(run):
+    """--dry-run writes nothing, so interrogating the user first is pointless."""
+    code, out, stub = run(
+        ["rm", "--from", "5", "--dry-run"],
+        delete_raindrops=0,
+        get_raindrops={"count": 4, "items": []},
+    )
+    assert code == 0
+    assert [c for c in stub.calls if c[0] == "delete_raindrops"]
+
+
+def test_empty_trash_confirms(run):
+    code, out, stub = run(["collections", "empty-trash"], empty_trash=True)
+    assert code == 1
+    assert not [c for c in stub.calls if c[0] == "empty_trash"]
+
+    code, out, stub = run(["collections", "empty-trash", "-y"], empty_trash=True)
+    assert code == 0
+    assert [c for c in stub.calls if c[0] == "empty_trash"]
+
+
+def test_tags_rm_confirms(run):
+    code, out, stub = run(["tags", "rm", "junk"], delete_tags=True)
+    assert code == 1
+    assert not [c for c in stub.calls if c[0] == "delete_tags"]
+
+
+def test_tag_scope_append_does_not_confirm(run):
+    """Appending a tag is additive and reversible, so it stays unprompted."""
+    code, out, stub = run(
+        ["tag", "--from", "5", "--add", "x"],
+        update_raindrops=3,
+        get_raindrops={"count": 3, "items": []},
+    )
+    assert code == 0
+    assert [c for c in stub.calls if c[0] == "update_raindrops"]
+
+
+def test_tag_scope_clear_confirms(run):
+    code, out, stub = run(
+        ["tag", "--from", "5", "--clear"],
+        update_raindrops=3,
+        get_raindrops={"count": 3, "items": []},
+    )
+    assert code == 1
+    assert not [c for c in stub.calls if c[0] == "update_raindrops"]
+
+
+# -- open ----------------------------------------------------------------------
+
+
+def test_open_launches_browser(run, monkeypatch):
+    opened = []
+    monkeypatch.setattr(
+        "rd_cli.commands.webbrowser.open", lambda url: opened.append(url) or True
+    )
+    code, out, stub = run(
+        ["open", "7"], get_raindrop={"_id": 7, "link": "https://example.com/a"}
+    )
+    assert code == 0
+    assert opened == ["https://example.com/a"]
+
+
+def test_open_print_does_not_launch(run, monkeypatch):
+    monkeypatch.setattr(
+        "rd_cli.commands.webbrowser.open",
+        lambda url: (_ for _ in ()).throw(AssertionError("should not launch")),
+    )
+    code, out, stub = run(
+        ["open", "7", "--print"],
+        get_raindrop={"_id": 7, "link": "https://example.com/a"},
+    )
+    assert code == 0
+    assert out.strip() == "https://example.com/a"
+
+
+def test_open_cache_uses_permanent_copy(run, monkeypatch):
+    opened = []
+    monkeypatch.setattr(
+        "rd_cli.commands.webbrowser.open", lambda url: opened.append(url) or True
+    )
+    code, out, stub = run(
+        ["open", "7", "--cache"],
+        get_raindrop={"_id": 7, "link": "https://example.com/a"},
+        get_permanent_copy_url="https://s3.example/copy",
+    )
+    assert code == 0
+    assert opened == ["https://s3.example/copy"]
+
+
+def test_open_missing_permanent_copy_errors(run, monkeypatch):
+    monkeypatch.setattr("rd_cli.commands.webbrowser.open", lambda url: True)
+    code, out, stub = run(
+        ["open", "7", "--cache"],
+        get_raindrop={"_id": 7, "link": "https://example.com/a"},
+        get_permanent_copy_url=None,
+    )
+    assert code == 1
 
 
 def test_tag_add_id_mode_merges(run):

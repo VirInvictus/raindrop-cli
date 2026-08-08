@@ -64,6 +64,36 @@ def success(message: str) -> None:
     print(color(message, "ok"))
 
 
+def confirm(question: str, *, assume_yes: bool = False, stdin=None) -> bool:
+    """Ask ``question`` and return True only on an explicit yes.
+
+    The prompt goes to stderr, not stdout, so confirming does not pollute a
+    redirected or piped stdout. A non-interactive stdin refuses rather than
+    prompting: a blocked read would hang a script forever, and defaulting to
+    yes would delete things nobody agreed to. Callers pass ``assume_yes`` for
+    the ``--yes`` escape hatch.
+    """
+    if assume_yes:
+        return True
+    stdin = stdin or sys.stdin
+    if not hasattr(stdin, "isatty") or not stdin.isatty():
+        error(
+            "refusing to prompt with a non-interactive stdin; "
+            "pass --yes to confirm up front"
+        )
+        return False
+    print(color(question, "star") + " [y/N] ", end="", file=sys.stderr, flush=True)
+    try:
+        reply = stdin.readline()
+    except (EOFError, KeyboardInterrupt):
+        print(file=sys.stderr)
+        return False
+    if not reply:  # EOF (Ctrl-D)
+        print(file=sys.stderr)
+        return False
+    return reply.strip().lower() in ("y", "yes")
+
+
 # -- domain formatters --------------------------------------------------------
 
 

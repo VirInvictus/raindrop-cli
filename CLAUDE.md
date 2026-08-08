@@ -106,6 +106,14 @@ uv run ruff format src tests  # format
 Bumping the version means editing `VERSION` only (pyproject and `__version__`
 read from it). Update `patchnotes.md` (newest at top) and tick `roadmap.md`.
 
+⚠ `rd --version` will keep reporting the **old** number until the editable
+install is rebuilt. `__version__` prefers `importlib.metadata`, and hatchling
+bakes `VERSION` into the dist metadata at install time, so a plain `uv sync`
+after a bump is a no-op (the dependency set did not change). Run
+`uv sync --reinstall-package rd-cli`. The `VERSION`-file fallback in
+`__init__.py` only fires when the package is not installed at all, so it does
+not paper over this.
+
 ---
 
 # Raindrop.io REST API v1 reference
@@ -185,6 +193,7 @@ affect raindrops **that are actually in `{cid}`** — the `ids` list filters
 | `PUT /raindrop/{id}/cover` (multipart)  | `upload_cover`           |
 | `POST /raindrop/suggest`                | `suggest_new`            |
 | `GET /raindrop/{id}/suggest`            | `suggest_existing`       |
+| `GET /raindrop/{id}/cache` (307)        | `get_permanent_copy_url` |
 
 Create/update body is built by `_raindrop_payload()`. Key fields: `link`
 (required on create), `title`, `excerpt` (max 10000), `note` (max 10000),
@@ -276,8 +285,10 @@ pink, purple, red, teal, yellow (default yellow).
 `get_stats` returns per-system-collection counts plus `meta` (pro, duplicates,
 broken). `get_filters` returns context counts (broken, duplicates, important,
 notag) and `tags`/`types` breakdowns; `tagsSort` is `-count` (default) or `_id`.
-Not wrapped (deliberately, low personal value): sharing/collaborator endpoints
-and the permanent-copy/cache PRO endpoint.
+Not wrapped (deliberately, low personal value): sharing/collaborator endpoints.
+The permanent-copy/cache PRO endpoint **is** wrapped as of v0.4.0
+(`get_permanent_copy_url`, backing `rd open --cache`); this line used to list it
+as skipped.
 
 ### Import / export / backups
 
@@ -303,7 +314,7 @@ noun→verb. The original flat commands (`c-list`, `c-add`, `c-rm`, `t-list`,
 them working.
 
 ```
-rd list | search | view | add | edit | rm | mv | tag | cover | import | export
+rd list | search | view | open | add | edit | rm | mv | tag | cover | import | export
 rd collections (c)  list|tree|view|add|edit|rm|merge|clean|empty-trash|reorder|cover|covers
 rd tags (t)         list|rename|merge|rm
 rd highlights (h)   list|add|edit|rm
@@ -329,11 +340,37 @@ sets, so an out-of-scope item already present on the other side is never
 re-imported. Delete propagation / conflict resolution (needs a persistent
 manifest) is deliberately not built; see `roadmap.md` Phase 6.
 
-Global: `--json` (any position), `--no-color`, `--version`, and **`--dry-run`**
+Global: `--json` (any position), `--no-color`, `--version`, **`--dry-run`**
 (logs the method + payload of every write to stderr and skips the API call;
-reads still run so plans can be built). `--dry-run` is enforced centrally in
-`RaindropClient._request` for any non-GET method, so it covers every write
-command automatically.
+reads still run so plans can be built), and **`-y`/`--yes`**. `--dry-run` is
+enforced centrally in `RaindropClient._request` for any non-GET method, so it
+covers every write command automatically.
+
+**Confirmation (v0.4.0).** `output.confirm()` prompts on **stderr** and returns
+True only on an explicit yes; `commands._confirmed()` wraps it with the
+`--yes` / `RD_ASSUME_YES` escape hatches and lets `--dry-run` through untouched
+(it writes nothing). A **non-interactive stdin refuses** rather than prompting:
+blocking would hang a script and defaulting to yes would delete data nobody
+agreed to. Prompts are gated on blast radius, not on every write:
+
+- **Unbounded** (scope mode, where `--from` matches an arbitrary number):
+  `rd rm --from`, `rd mv --from`, `rd tag --from --clear`. `_scope_count()`
+  counts first so the prompt states a real number; the list endpoint is not
+  documented to return a total, so a missing `count` degrades to "every
+  raindrop in collection X" rather than a wrong figure.
+- **Irreversible:** `rd rm --permanent`, `rd collections empty-trash`,
+  `rd tags rm`, and `rd collections rm` (it takes the contents along).
+- **Not prompted:** id-mode `rd rm` to Trash (recoverable) and scope-mode
+  `rd tag --add` (additive). Keep it that way; a prompt on the common path
+  just trains people to reach for `-y` reflexively.
+
+**`rd open`** resolves a URL and hands it to `webbrowser.open()` (stdlib).
+`--cache`/`--permanent` uses `client.get_permanent_copy_url()`, which calls
+`GET /raindrop/{id}/cache` with **`allow_redirects=False`** and returns the
+`307`'s `Location`. That is why the client holds a second
+`_noredirect_opener`: urllib's default opener would follow the redirect and
+hand back the copy's bytes instead of its URL. An injected `opener` (tests) is
+used for both so a fake transport still sees every call.
 
 **Bulk commands and the id-list vs scope split** (this is the important part,
 grounded in the verified batch-scope quirk above):

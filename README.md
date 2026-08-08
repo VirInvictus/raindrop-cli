@@ -119,11 +119,40 @@ These work with any command and may appear **before or after** the subcommand
 | `--json` | Emit a single JSON document to stdout and nothing else. See [Output modes](#output-modes). |
 | `--no-color` | Force plain text even on a TTY. |
 | `--dry-run` | Preview every **write**: log its method and payload to stderr and skip the API call. Reads still run, so you can plan a change safely first. |
+| `-y`, `--yes` | Answer every confirmation prompt with yes. See [Confirmation](#confirmation). |
 | `--version` | Print the version and exit. |
 | `-h`, `--help` | Show help for the program or any subcommand. |
 
 `--dry-run` is enforced in one place (the HTTP layer) for any non-GET request,
 so it reliably covers every command that changes data, including bulk ones.
+
+### Confirmation
+
+Operations that can destroy an unbounded or unrecoverable amount of data ask
+before proceeding. The gate is blast radius, not every write, so the everyday
+path stays quiet:
+
+| Asks | Why |
+| ---- | --- |
+| `rd rm --from`, `rd mv --from`, `rd tag --from --clear` | Scope mode matches an arbitrary number of raindrops. The prompt counts them first and tells you how many. |
+| `rd rm --permanent` | Skips Trash. There is no undo. |
+| `rd collections rm` | Takes the collection's raindrops with it. |
+| `rd collections empty-trash`, `rd tags rm` | Unrecoverable, and afterwards there is no way to enumerate what was affected. |
+
+Removing by id to Trash is **not** prompted (Trash is recoverable), and neither
+is appending tags in scope mode (additive).
+
+To skip the prompts, pass `-y`/`--yes`, or set `RD_ASSUME_YES=1` for cron jobs
+and scripts that cannot answer one. `--dry-run` bypasses confirmation entirely,
+because it performs no writes and showing you the plan is the entire point.
+
+Two deliberate behaviours worth knowing:
+
+- The prompt is written to **stderr**, so confirming never contaminates a
+  redirected or piped stdout.
+- A **non-interactive stdin refuses** instead of prompting. Blocking on a read
+  nobody can answer would hang a script forever, and silently assuming yes would
+  delete data nobody agreed to. Pass `--yes` when you mean it.
 
 ## Command reference
 
@@ -138,6 +167,7 @@ any command. Grouped commands also have one-letter aliases: `c` for
 | `rd list` | List raindrops. Flags: `-c/--collection <id>` (default `0` = all), `-s/--search <query>`, `--sort <key>`, `--page <n>`, `--perpage <n>` (max 50), `-a/--all` (fetch every page), `-n/--nested` (include nested collections), `-d/--detailed` (show excerpt, note, tags). |
 | `rd search <query>` | Shorthand for `list` with a positional search query. Same flags as `list`. |
 | `rd view <id>` | Show one raindrop in full (link, domain, type, dates, collection, excerpt, note, tags, highlights). |
+| `rd open <ids...>` | Open raindrop(s) in your browser. `--cache` (alias `--permanent`) opens the archived permanent copy instead of the original link (PRO, and only some links are stored). `-p/--print` prints the URL and launches nothing, for SSH sessions and pipes. |
 | `rd add <url>` | Create a raindrop. Flags: `-t/--title`, `-c/--collection` (default `-1` = Unsorted), `--tags <t...>`, `--excerpt`, `--note`, `--important`, `--no-parse` (skip background metadata fetch), and `--file <path>` / `--stdin` for [bulk add](#bulk-operations-and-the-id-list-vs-scope-model). |
 | `rd edit <id>` | Update a raindrop. Flags: `-t/--title`, `--tags <t...>` (replaces), `-c/--collection` (move), `--excerpt`, `--note`, `--important` / `--not-important`. |
 | `rd rm <ids...>` | Move raindrop(s) to Trash. `--permanent` deletes for good; scope flags `--from`, `-s`, `-n` remove a whole collection. See [bulk](#bulk-operations-and-the-id-list-vs-scope-model). |
@@ -191,6 +221,9 @@ rd tag --from 111 --clear        # strip all tags across a collection
 
 # Preview any of the above without touching the API
 rd --dry-run mv 999 --from 111
+
+# Scope and permanent operations confirm first; -y answers up front
+rd rm --from 111 -y
 ```
 
 Notes:

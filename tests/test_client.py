@@ -228,3 +228,38 @@ def test_multipart_contains_boundary_and_parts():
 def test_collection_payload_parent_shape():
     payload = client_mod._collection_payload(title="X", parent_id=9)
     assert payload == {"title": "X", "parent": {"$id": 9}}
+
+
+# -- permanent copy (307) -----------------------------------------------------
+
+
+def test_permanent_copy_returns_location_without_following():
+    """The endpoint answers 307; we want the Location, not the copy's bytes."""
+    c, opener, _ = make_client(
+        [http_error(307, headers={"Location": "https://s3.example/copy?sig=abc"})]
+    )
+    assert c.get_permanent_copy_url(9) == "https://s3.example/copy?sig=abc"
+    assert opener.last.full_url.endswith("/raindrop/9/cache")
+
+
+def test_permanent_copy_none_when_no_location():
+    c, opener, _ = make_client([http_error(307, headers={})])
+    assert c.get_permanent_copy_url(9) is None
+
+
+def test_permanent_copy_still_raises_on_real_errors():
+    """A 404 is an error, not a redirect: it must not be swallowed as a URL."""
+    c, opener, _ = make_client([http_error(404, {"errorMessage": "not found"})])
+    with pytest.raises(NotFoundError):
+        c.get_permanent_copy_url(9)
+
+
+def test_real_client_builds_a_separate_non_following_opener():
+    """Without an injected transport the two openers must genuinely differ, or
+    urllib would follow the 307 and hand back the copy instead of its URL."""
+    c = RaindropClient("tok")
+    assert c._opener is not c._noredirect_opener
+    assert any(
+        isinstance(h, client_mod._NoRedirect) for h in c._noredirect_opener.handlers
+    )
+    assert not any(type(h) is client_mod._NoRedirect for h in c._opener.handlers)

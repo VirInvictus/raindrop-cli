@@ -40,6 +40,15 @@ TRASH = -99
 PERPAGE_MAX = 50
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Redirect handler that declines to follow. Returning ``None`` from
+    ``redirect_request`` makes urllib raise the 3xx as an ``HTTPError``, which
+    is how ``_request`` gets at the ``Location`` header."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
 class RaindropClient:
     def __init__(
         self,
@@ -58,6 +67,11 @@ class RaindropClient:
         self.max_retries = max_retries
         self.dry_run = dry_run
         self._opener = opener or urllib.request.build_opener()
+        # The permanent-copy endpoint answers 307 with the real location in a
+        # header; urllib's default opener would silently follow it and hand back
+        # the copy's bytes instead of its URL. An injected opener (tests) is used
+        # for both so a fake transport still sees every call.
+        self._noredirect_opener = opener or urllib.request.build_opener(_NoRedirect)
         self._sleep = sleep
 
     # -- core -----------------------------------------------------------------
@@ -72,6 +86,7 @@ class RaindropClient:
         files: dict[str, tuple[str, bytes, str]] | None = None,
         form: dict[str, str] | None = None,
         expect_json: bool = True,
+        allow_redirects: bool = True,
     ) -> Any:
         url = self.base_url + path
         query = _encode_params(params)
@@ -100,15 +115,21 @@ class RaindropClient:
 
         req = urllib.request.Request(url, data=data, headers=headers, method=method)
 
+        opener = self._opener if allow_redirects else self._noredirect_opener
+
         attempt = 0
         while True:
             try:
-                with self._opener.open(req, timeout=self.timeout) as resp:
+                with opener.open(req, timeout=self.timeout) as resp:
                     body = resp.read()
                 if not expect_json:
                     return body
                 return json.loads(body) if body else {}
             except urllib.error.HTTPError as exc:
+                # With redirects suppressed a 3xx is the answer, not an error:
+                # the caller wants the target URL, so hand back Location.
+                if not allow_redirects and exc.code in (301, 302, 303, 307, 308):
+                    return exc.headers.get("Location")
                 retry_after = self._retry_wait(exc, attempt)
                 if retry_after is not None and attempt < self.max_retries:
                     self._sleep(retry_after)
@@ -196,6 +217,19 @@ class RaindropClient:
 
     def suggest_existing(self, raindrop_id: int) -> dict:
         return self._request("GET", f"/raindrop/{raindrop_id}/suggest").get("item", {})
+
+    def get_permanent_copy_url(self, raindrop_id: int) -> str | None:
+        """URL of the raindrop's permanent copy, or ``None`` if there isn't one.
+
+        The endpoint answers 307 with the storage URL in ``Location`` (the copy
+        itself is a PRO feature, so a free account or an unarchived link yields
+        no redirect). The returned URL is pre-signed and short-lived, which is
+        why it is fetched on demand rather than cached.
+        """
+        result = self._request(
+            "GET", f"/raindrop/{raindrop_id}/cache", allow_redirects=False
+        )
+        return result if isinstance(result, str) and result else None
 
     # -- raindrops: multiple --------------------------------------------------
 

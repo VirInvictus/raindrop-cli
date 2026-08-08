@@ -2,6 +2,46 @@
 
 Newest at the top.
 
+## 0.4.0
+
+### Added
+
+- **`rd open <id>...` opens raindrops in your browser.** Takes any number of
+  ids. `--cache` (alias `--permanent`) opens the archived permanent copy
+  instead of the original link: that endpoint answers `307` with the storage
+  URL in a header, so the client asks for it with redirects suppressed and
+  reads `Location` rather than following it and downloading the copy. The
+  archive is a PRO feature and only some links are stored, so a missing copy
+  reports that plainly instead of opening the wrong thing. `--print` emits the
+  URL and launches nothing, which is what you want over SSH or in a pipe.
+- **Confirmation prompts on destructive operations.** The guard used to be
+  `--dry-run` and nothing else, which only helps if you remember to type it
+  first. Prompts are gated on blast radius rather than on every write, so the
+  common path stays quiet:
+  - **Unbounded:** scope mode on `rd rm`, `rd mv`, and `rd tag --clear`, where
+    `--from` can match any number of raindrops. The prompt counts them first
+    and names the number.
+  - **Irreversible:** `rd rm --permanent`, `rd collections empty-trash`, and
+    `rd tags rm`. `rd collections rm` also asks, because deleting a collection
+    takes its contents along with it.
+  - **Not prompted:** removing by id to Trash (recoverable), and appending tags
+    in scope mode (additive).
+- `-y`/`--yes` skips the prompts, and `RD_ASSUME_YES=1` does the same for cron
+  and scripts that cannot answer one. `--dry-run` bypasses confirmation
+  entirely, since it performs no writes and its whole purpose is to show you
+  what would happen.
+
+### Notes
+
+- A non-interactive stdin **refuses** rather than prompting. Blocking on a read
+  no one can answer would hang a script forever, and assuming yes would delete
+  things nobody agreed to.
+- The prompt is written to stderr, so confirming does not contaminate a
+  redirected stdout.
+- The affected-item count is read opportunistically. The list endpoint is not
+  documented to return a total, so a missing count produces "every raindrop in
+  collection X" rather than a confidently wrong number.
+
 ## 0.3.0
 
 ### Added

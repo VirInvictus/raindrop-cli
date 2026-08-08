@@ -46,7 +46,9 @@ portfolio conventions.
 - [ ] Automatic token refresh on `401` when a refresh token is present.
 - [ ] Optional secret storage via the Secret Service (`oo7`/keyring) instead of
       plaintext `config.toml` (ask before adding the dep).
-- [ ] `rd open <id>` to launch a raindrop (or its permanent copy) in the browser.
+- [x] `rd open <id>` to launch a raindrop (or its permanent copy) in the browser.
+      Takes several ids, `--cache` for the permanent copy (read off the `307`
+      `Location`, PRO only), and `--print` to emit the URL instead of launching.
 
 ## Phase 3: batch and power features (mostly shipped in Phase 1)
 
@@ -54,8 +56,13 @@ portfolio conventions.
       batch methods, plus `--dry-run` as the safety guard.
 - [x] `rd import <file>` (Netscape/Pocket/Instapaper) via `POST /import/file`.
 - [x] Collection cover upload / icon search commands.
-- [ ] Interactive confirmation prompt for large destructive scope operations
-      (currently guarded only by `--dry-run`).
+- [x] Interactive confirmation prompt for large destructive scope operations.
+      Gated on unbounded or irreversible blast radius, not on every write: any
+      scope mode (`rm`/`mv`/`tag --clear --from`), `rm --permanent`,
+      `collections rm`, `collections empty-trash`, and `tags rm`. Removing to
+      Trash by id stays unprompted because it is recoverable. `-y`/`--yes` and
+      `RD_ASSUME_YES` are the escape hatches, `--dry-run` bypasses (it writes
+      nothing), and a non-interactive stdin refuses rather than hanging.
 - [ ] `--fields` projection for `--json` output; `--format` templates for human
       output.
 - [ ] A `rd context`/`--schema` dump (whole tree + data-model schema) as an

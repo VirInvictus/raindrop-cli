@@ -52,6 +52,16 @@ def build_parser() -> argparse.ArgumentParser:
         default=argparse.SUPPRESS,
         help="preview writes (log method + payload) without calling the API",
     )
+    # Lives on the shared parent for the same reason --dry-run does: it must
+    # work in any position, and threading it onto each destructive subparser
+    # would mean repeating the SUPPRESS dance six times.
+    common.add_argument(
+        "-y",
+        "--yes",
+        action="store_true",
+        default=argparse.SUPPRESS,
+        help="skip confirmation prompts on destructive operations",
+    )
 
     parser = argparse.ArgumentParser(
         prog="rd",
@@ -138,6 +148,23 @@ def _add_raindrop_commands(sub, common):
 
     p = _p(sub, "view", common, commands.cmd_view, help="view a single raindrop")
     p.add_argument("id", type=int, help="raindrop id")
+
+    p = _p(sub, "open", common, commands.cmd_open, help="open raindrop(s) in a browser")
+    p.add_argument("ids", type=int, nargs="+", help="raindrop id(s)")
+    p.add_argument(
+        "--cache",
+        "--permanent",
+        dest="cache",
+        action="store_true",
+        help="open the permanent copy instead of the original link (PRO)",
+    )
+    p.add_argument(
+        "-p",
+        "--print",
+        dest="print_url",
+        action="store_true",
+        help="print the URL instead of launching a browser",
+    )
 
     p = _p(sub, "add", common, commands.cmd_add, help="add a raindrop (or many)")
     p.add_argument("url", nargs="?", help="URL to bookmark")
@@ -684,6 +711,7 @@ def main(argv: list[str] | None = None) -> int:
     args.json = getattr(args, "json", False)
     args.no_color = getattr(args, "no_color", False)
     args.dry_run = getattr(args, "dry_run", False)
+    args.yes = getattr(args, "yes", False)
     output.configure(no_color=args.no_color)
 
     if not getattr(args, "func", None):

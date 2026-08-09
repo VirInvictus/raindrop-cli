@@ -311,6 +311,7 @@ rd highlights add 12345 "an important sentence" --color green --note "why"
 | `rd filters` | Context filters for a collection: `-c/--collection`, `--tags-sort {-count,_id}`, `-s/--search`. Shows broken/duplicate/important/untagged counts and type/tag breakdowns. |
 | `rd suggest` | Suggest collections and tags. Provide `--url <url>` (new) or `--id <raindrop>` (existing). PRO plan only. |
 | `rd exists <urls...>` | Check whether URLs are already saved (dedup). Prints the matching ids. |
+| `rd completion <shell>` | Print a completion script for `bash`, `zsh`, or `fish`. Generated from the parser, so it always matches this build's commands. |
 
 ```bash
 rd user

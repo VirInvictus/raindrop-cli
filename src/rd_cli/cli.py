@@ -13,7 +13,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from . import __version__, commands, config, output
+from . import __version__, commands, completion, config, output
 from .client import RaindropClient
 from .errors import RaindropError
 from .pinboard import PinboardClient
@@ -535,6 +535,20 @@ def _add_misc_commands(sub, common):
     )
 
     _p(sub, "stats", common, commands.cmd_stats, help="system collection counts")
+
+    comp = _p(
+        sub,
+        "completion",
+        common,
+        commands.cmd_completion,
+        needs_client=False,
+        help="print a shell completion script",
+    )
+    comp.add_argument(
+        "shell",
+        choices=list(completion.SHELLS),
+        help="shell to generate completion for",
+    )
 
     p = _p(
         sub,

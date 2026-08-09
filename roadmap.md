@@ -70,7 +70,8 @@ portfolio conventions.
 
 ## Phase 4: ergonomics (planned)
 
-- [ ] Shell completion (bash/zsh/fish) generated from the parser.
+- [x] Shell completion (bash/zsh/fish) generated from the parser. (0.5.0 —
+      `rd completion <shell>`, walked off `build_parser()` so it cannot drift.)
 - [ ] Config profiles (multiple accounts/tokens).
 - [ ] Optional interactive picker (fzf-style) behind a flag, still dependency-free.
 

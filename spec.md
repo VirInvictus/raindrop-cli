@@ -24,7 +24,9 @@ services landed in 0.2.0 and 0.3.0.
 
 - OAuth2 server flow and token refresh (test token only for now).
 - Collaboration/sharing endpoints and destructive `PUT /user` changes.
-- A TUI, shell completion, or a config-profile system.
+- A TUI or a config-profile system. (Shell completion shipped in 0.5.0 and is no
+  longer a non-goal; it is generated from the parser, so it adds no dependency
+  and nothing to maintain by hand.)
 - Sharing/collaborator endpoints and the permanent-copy/cache PRO endpoint.
 - Interactive confirmation prompts (bulk safety is via `--dry-run` for now).
 

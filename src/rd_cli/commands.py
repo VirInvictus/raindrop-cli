@@ -1097,6 +1097,18 @@ def cmd_sync(client: Any, args: Any) -> int:
 # -- config -------------------------------------------------------------------
 
 
+def cmd_completion(client: Any, args: Any) -> int:
+    """Print the completion script for a shell.
+
+    Imported lazily and built from the live parser, so the output can never drift
+    from the commands this build actually has.
+    """
+    from . import cli, completion
+
+    print(completion.generate(args.shell, cli.build_parser()), end="")
+    return 0
+
+
 def cfg_path(client: Any, args: Any) -> int:
     print(config.config_path())
     return 0

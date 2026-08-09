@@ -9,6 +9,10 @@ Read, add, edit, reorganize, and remove your bookmarks (raindrops), collections,
 tags, and highlights from the terminal, with designed ANSI output for humans and
 `--json` for scripts and AI agents.
 
+<p align="center">
+  <img src="docs/screenshots/list.png" alt="rd-cli listing a collection: bookmark ids, titles, and URLs in designed ANSI colour, followed by account stats">
+</p>
+
 - **Zero runtime dependencies.** Pure Python standard library (`urllib`, `json`,
   `tomllib`, `argparse`). Nothing to audit, nothing to break.
 - **Full API coverage.** Every practical Raindrop REST API v1 endpoint:

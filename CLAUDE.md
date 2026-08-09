@@ -318,7 +318,7 @@ rd list | search | view | open | add | edit | rm | mv | tag | cover | import | e
 rd collections (c)  list|tree|view|add|edit|rm|merge|clean|empty-trash|reorder|cover|covers
 rd tags (t)         list|rename|merge|rm
 rd highlights (h)   list|add|edit|rm
-rd user [show|set] | stats | filters | suggest | exists
+rd user [show|set] | stats | filters | suggest | exists | completion <shell>
 rd backups          list|create|download
 rd pinboard (pb)    list|get|add|rm|edit|tag|suggest ; tags list|rename|rm ; notes list|view
 rd sync             two-way additive Raindrop<->Pinboard sync (--dry-run, scoping)

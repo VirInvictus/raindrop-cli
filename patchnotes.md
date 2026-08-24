@@ -1,3 +1,6 @@
+## v0.5.2 (2026-08-24)
+
+- **Build:** Replaced unittest with pytest in the CI workflow, restoring test coverage execution.
 ## v0.5.1 (2026-08-23)
 
 - **Build:** build: add GitHub Actions CI workflow

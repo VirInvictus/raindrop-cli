@@ -120,3 +120,23 @@ the existing HTTP/output/config machinery.
 - Sharing/collaborator commands (little personal value; the web UI covers it).
 - Library extraction of `client.py` into a standalone `raindrop` package
   (a post-1.0 call once the surface is stable and a second consumer exists).
+
+## Phase 7: Robustness & CLI Bug Sweep (2026-08-23)
+*Context: Identified CLI crashes, cross-service data loss, and documentation inaccuracies during codebase sweep.*
+
+### Bugs to Fix
+- [ ] **Context Count Crash:** Fix `cmd_filters` raising `AttributeError` when Raindrop API returns raw integer counts instead of dicts.
+- [ ] **False Positives in Human Mode:** Ensure human output mode checks the `ok` variable and returns exit code `1` on failure, matching the JSON mode behavior.
+- [ ] **Timestamp Loss on Pinboard / Sync:** Ensure `PinboardClient.edit_post` and cross-service sync operations preserve the original bookmark creation time (`dt=current.get("time")`) instead of overwriting with the current date.
+- [ ] **Highlight ANSI Colors:** Map Raindrop highlight colors (`yellow`, `blue`, etc.) to standard ANSI color codes in `output.py` so the `▍` marker isn't completely colorless.
+- [ ] **`toread` Flag Drop:** Fix `raindrop_to_pinboard` dropping the unread status during cross-service pushes to Pinboard.
+- [ ] **KeyError on Malformed Raindrops:** Use `.get("link")` in `plan_sync` to avoid crashing on uploaded files/documents that lack a URL.
+- [ ] **Percent-Encoding Slashes:** Pass `safe=""` to `urllib.parse.quote` in `search_covers` so slashes inside cover search terms don't break the URL path.
+- [ ] **`.env` Loading Skip:** Remove the early `return` in `load_env_files` to ensure both local and global configuration files are read.
+- [ ] **Browser Launch in Headless:** Prevent `cmd_open` from calling `webbrowser.open()` when `--json` is specified to prevent headless system errors.
+
+### Refactoring & Growth
+- [ ] **Standardize Command Dispatch:** Extract boilerplate `if args.json: emit(...) else: success(...)` branching into a single helper method.
+- [ ] **Safe File Writing:** Use atomic `os.open` and proper TOML escaping in `config.py` to prevent temporary permission exposure of tokens.
+- [ ] **Multi-Level Completion:** Expand bash/zsh/fish generators to correctly autocomplete nested subcommands (e.g., `rd pinboard tags list <TAB>`).
+- [ ] **Docs Sync:** Update `CLAUDE.md` and `spec.md` to reflect that `rd sync`, `rd open`, and interactive prompts are now implemented.

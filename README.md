@@ -483,11 +483,11 @@ from rd_cli.client import RaindropClient
 
 client = RaindropClient(resolve_token())
 
-for rd in client.iter_raindrops(0, search="python"):   # auto-paginates
+for rd in client.iter_raindrops(0, search="python"):  # auto-paginates
     print(rd["_id"], rd["link"])
 
 client.create_raindrop("https://example.com", tags=["read-later"], please_parse=True)
-client.update_raindrops(111, search="is:broken", move_to=999)   # scope move
+client.update_raindrops(111, search="is:broken", move_to=999)  # scope move
 ```
 
 Construction options: `RaindropClient(token, *, base_url=..., timeout=30.0,

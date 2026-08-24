@@ -1,3 +1,7 @@
+## v0.5.1 (2026-08-23)
+
+- **Build:** build: add GitHub Actions CI workflow
+
 # Patch notes
 
 Newest at the top.

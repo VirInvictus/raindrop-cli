@@ -56,15 +56,11 @@ tags, and highlights from the terminal, with designed ANSI output for humans and
 Requires Python 3.11 or newer (the floor for the standard-library `tomllib`).
 
 ```bash
-# From a clone, into the current environment:
-uv pip install -e .
-
-# Or set up a dev environment (editable install + dev tools):
-uv sync
+pipx install rd-cli
 ```
 
 After installation the `rd` command is on your `PATH`. You can also run it
-without installing via `python -m rd_cli`.
+without installing via `python -m rd_cli` in a checkout.
 
 ## Authentication
 

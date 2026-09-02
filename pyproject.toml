@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "rd-cli"
+name = "raindrop-cli"
 description = "A stdlib-only command-line client for Raindrop.io"
 readme = "README.md"
 license = "MIT"

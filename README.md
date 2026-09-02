@@ -56,7 +56,7 @@ tags, and highlights from the terminal, with designed ANSI output for humans and
 Requires Python 3.11 or newer (the floor for the standard-library `tomllib`).
 
 ```bash
-pipx install rd-cli
+pipx install raindrop-cli
 ```
 
 After installation the `rd` command is on your `PATH`. You can also run it

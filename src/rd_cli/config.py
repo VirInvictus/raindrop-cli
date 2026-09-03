@@ -4,9 +4,9 @@ Resolution order for the access token (first hit wins):
 
 1. ``RAINDROP_TOKEN`` environment variable.
 2. ``RAINDROP_TEST_TOKEN`` environment variable (back-compat alias).
-3. ``token`` key in ``$XDG_CONFIG_HOME/rd-cli/config.toml``.
+3. ``token`` key in ``$XDG_CONFIG_HOME/raindrop-cli/config.toml``.
 4. ``RAINDROP_TOKEN`` / ``RAINDROP_TEST_TOKEN`` in a ``.env`` file, searched in
-   the current directory then ``$XDG_CONFIG_HOME/rd-cli/.env``.
+   the current directory then ``$XDG_CONFIG_HOME/raindrop-cli/.env``.
 
 The ``.env`` reader is a deliberately tiny stdlib parser so we carry no
 ``python-dotenv`` dependency. It only loads keys that are not already in the
@@ -27,10 +27,10 @@ PINBOARD_ENV_VARS = ("PINBOARD_TOKEN", "PINBOARD_API_TOKEN")
 
 
 def config_dir() -> Path:
-    """Return the rd-cli config directory (respects ``XDG_CONFIG_HOME``)."""
+    """Return the raindrop-cli config directory (respects ``XDG_CONFIG_HOME``)."""
     base = os.environ.get("XDG_CONFIG_HOME")
     root = Path(base) if base else Path.home() / ".config"
-    return root / "rd-cli"
+    return root / "raindrop-cli"
 
 
 def config_path() -> Path:

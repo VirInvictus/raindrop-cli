@@ -1,4 +1,4 @@
-"""rd-cli — a stdlib-only command-line client for Raindrop.io.
+"""raindrop-cli — a stdlib-only command-line client for Raindrop.io.
 
 The version is sourced from installed package metadata, falling back to the
 root ``VERSION`` file for editable/source checkouts. ``VERSION`` is the single
@@ -13,7 +13,7 @@ from pathlib import Path
 
 def _version() -> str:
     try:
-        return version("rd-cli")
+        return version("raindrop-cli")
     except PackageNotFoundError:
         version_file = Path(__file__).resolve().parent.parent.parent / "VERSION"
         try:

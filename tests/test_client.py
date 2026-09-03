@@ -29,7 +29,7 @@ def test_auth_header_and_user_agent_present():
     c.get_raindrop(5)
     req = opener.last
     assert req.get_header("Authorization") == "Bearer tok"
-    assert "rd-cli/" in req.get_header("User-agent")
+    assert "raindrop-cli/" in req.get_header("User-agent")
     assert req.get_method() == "GET"
     assert req.full_url.endswith("/raindrop/5")
 

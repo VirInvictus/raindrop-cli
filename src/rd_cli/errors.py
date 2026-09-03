@@ -1,4 +1,4 @@
-"""Exception hierarchy for rd-cli.
+"""Exception hierarchy for raindrop-cli.
 
 Every failure the CLI can surface derives from :class:`RaindropError`, so the
 top-level handler in ``cli.py`` catches one type and prints one clean message.
@@ -10,7 +10,7 @@ from __future__ import annotations
 
 
 class RaindropError(Exception):
-    """Base class for every rd-cli error."""
+    """Base class for every raindrop-cli error."""
 
 
 class ConfigError(RaindropError):

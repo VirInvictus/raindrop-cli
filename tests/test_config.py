@@ -42,7 +42,7 @@ def test_resolve_token_reads_config_file(monkeypatch, tmp_path):
     monkeypatch.delenv("RAINDROP_TEST_TOKEN", raising=False)
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
     monkeypatch.chdir(tmp_path)  # avoid picking up a stray ./.env
-    cfg_dir = tmp_path / "rd-cli"
+    cfg_dir = tmp_path / "raindrop-cli"
     cfg_dir.mkdir()
     (cfg_dir / "config.toml").write_text('token = "from-file"\n')
     assert config.resolve_token() == "from-file"

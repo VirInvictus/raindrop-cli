@@ -64,7 +64,7 @@ wheels = [
 ]
 
 [[package]]
-name = "rd-cli"
+name = "raindrop-cli"
 source = { editable = "." }
 
 [package.dev-dependencies]

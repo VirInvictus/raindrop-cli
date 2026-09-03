@@ -12,7 +12,7 @@ states exactly what is being relied on, and ``tests/test_completion.py`` calls i
 so a Python upgrade that moves any of it fails loudly with a pointed message
 instead of silently emitting empty scripts.
 
-No third-party dependency is involved (rd-cli is stdlib-only), which also rules
+No third-party dependency is involved (raindrop-cli is stdlib-only), which also rules
 out argcomplete.
 """
 

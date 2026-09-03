@@ -1,4 +1,4 @@
-# rd-cli specification
+# raindrop-cli specification
 
 The contract for `rd`, a stdlib-only command-line client for Raindrop.io. This
 document defines behavior that callers (humans and scripts) may rely on. The
@@ -36,10 +36,10 @@ The token is resolved by `config.resolve_token()` in this order; first hit wins:
 
 1. `RAINDROP_TOKEN` environment variable.
 2. `RAINDROP_TEST_TOKEN` environment variable (back-compat alias).
-3. `token` key in `$XDG_CONFIG_HOME/rd-cli/config.toml`
-   (default `~/.config/rd-cli/config.toml`).
+3. `token` key in `$XDG_CONFIG_HOME/raindrop-cli/config.toml`
+   (default `~/.config/raindrop-cli/config.toml`).
 4. `RAINDROP_TOKEN` / `RAINDROP_TEST_TOKEN` in a `.env` file: `./.env` first,
-   then `$XDG_CONFIG_HOME/rd-cli/.env`.
+   then `$XDG_CONFIG_HOME/raindrop-cli/.env`.
 
 Real environment variables always win over `.env` (the reader is
 non-clobbering). `rd config set-token <token>` writes the config file with

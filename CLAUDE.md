@@ -1,12 +1,12 @@
 # CLAUDE.md
 
-Guidance for Claude Code working in **rd-cli**, a stdlib-only command-line
+Guidance for Claude Code working in **raindrop-cli**, a stdlib-only command-line
 client for the [Raindrop.io](https://raindrop.io) bookmarking service. This file
 documents both the Raindrop REST API and this codebase. Read it before changing
 API behavior or the command surface.
 
 The portfolio conventions in `~/.claude/CLAUDE.md` and `~/.gitrepos/CLAUDE.md`
-apply. Where they conflict with this file, this file wins for rd-cli.
+apply. Where they conflict with this file, this file wins for raindrop-cli.
 
 ## What this is
 
@@ -38,7 +38,7 @@ House constraints that shaped it:
 ## Layout
 
 ```
-rd-cli/
+raindrop-cli/
   VERSION                  single source of truth for the version
   pyproject.toml           reads VERSION dynamically (hatchling); rd script entry
   src/rd_cli/
@@ -62,8 +62,8 @@ forking. Not now; post-1.0 call.
 
 - **`config.resolve_token()`** is the only place that decides the token. Order:
   `RAINDROP_TOKEN` env, `RAINDROP_TEST_TOKEN` env (back-compat alias),
-  `token` in `$XDG_CONFIG_HOME/rd-cli/config.toml`, then a `.env` file
-  (`./.env`, then `$XDG_CONFIG_HOME/rd-cli/.env`). The `.env` reader is a tiny
+  `token` in `$XDG_CONFIG_HOME/raindrop-cli/config.toml`, then a `.env` file
+  (`./.env`, then `$XDG_CONFIG_HOME/raindrop-cli/.env`). The `.env` reader is a tiny
   hand-rolled parser (`parse_env`) and is non-clobbering (real env wins).
 - **`RaindropClient._request()`** is the only place that touches the network.
   It attaches auth, applies a timeout, lowercases boolean query params,
@@ -110,7 +110,7 @@ read from it). Update `patchnotes.md` (newest at top) and tick `roadmap.md`.
 install is rebuilt. `__version__` prefers `importlib.metadata`, and hatchling
 bakes `VERSION` into the dist metadata at install time, so a plain `uv sync`
 after a bump is a no-op (the dependency set did not change). Run
-`uv sync --reinstall-package rd-cli`. The `VERSION`-file fallback in
+`uv sync --reinstall-package raindrop-cli`. The `VERSION`-file fallback in
 `__init__.py` only fires when the package is not installed at all, so it does
 not paper over this.
 
@@ -120,14 +120,14 @@ not paper over this.
 
 Base URL: `https://api.raindrop.io/rest/v1`. Official docs mirror is cloned at
 `../developer-site` (read it there for exhaustive field tables). Summary below
-is what rd-cli relies on.
+is what raindrop-cli relies on.
 
 ## Auth
 
 Every call needs `Authorization: Bearer <token>`. Two token kinds:
 
 - **Test token**: from the [App Management Console](https://app.raindrop.io/settings/integrations),
-  scoped to your own account, **does not expire**. This is what rd-cli uses.
+  scoped to your own account, **does not expire**. This is what raindrop-cli uses.
 - **OAuth access token**: from the 3-legged OAuth2 flow, **expires after two
   weeks**, refreshable via `refresh_token`. Not implemented yet (roadmap).
 
@@ -173,7 +173,7 @@ affect raindrops **that are actually in `{cid}`** — the `ids` list filters
 - Using the **destination** (or a collection the items are not in) as the path
   silently does nothing: `modified: 0`, no error. This is a footgun.
 - So there is no "move/delete these ids wherever they live" batch call. In
-  rd-cli, **id-lists loop the single-item endpoints** (`PUT`/`DELETE
+  raindrop-cli, **id-lists loop the single-item endpoints** (`PUT`/`DELETE
   /raindrop/{id}`, which carry no collection scope and always work), and the
   batch endpoints are reserved for **collection/search scope** (move or delete
   "everything in collection X matching search Y" in one call). See `cmd_mv` /
@@ -405,13 +405,13 @@ Note: values that start with `-` (the `-count`/`-title` sort keys) must use
 # Pinboard API v1 reference
 
 Base URL: `https://api.pinboard.in/v1`. Wrapped by `PinboardClient` in
-`pinboard.py`. Only what rd-cli relies on is summarized here.
+`pinboard.py`. Only what raindrop-cli relies on is summarized here.
 
 ## Auth and format
 
 - **Token in the query string**, not a header: `?auth_token=user:HEX`. The token
   (format `username:HEX`) is at https://pinboard.in/settings/password; requesting
-  a new one invalidates the old. rd-cli also accepts HTTP Basic in principle, but
+  a new one invalidates the old. raindrop-cli also accepts HTTP Basic in principle, but
   only the token path is wired.
 - **`format=json`** is added to every call (Pinboard defaults to XML).
 - Resolution order mirrors Raindrop: `PINBOARD_TOKEN` / `PINBOARD_API_TOKEN`
@@ -423,7 +423,7 @@ Base URL: `https://api.pinboard.in/v1`. Wrapped by `PinboardClient` in
   `posts/delete`, `tags/rename`, `tags/delete`). So `--dry-run` cannot key off
   the HTTP method: `_request` takes an explicit `write=True` for the mutators.
 - **Bookmarks are keyed by URL.** There are no numeric ids and **no collections**
-  (tags are the only organization). A `hash` field identifies content but rd-cli
+  (tags are the only organization). A `hash` field identifies content but raindrop-cli
   addresses bookmarks by their `url`.
 - **No update endpoint.** An edit is a re-`add` of the same URL with
   `replace=yes`. `PinboardClient.edit_post` does the read-modify-write so a

@@ -17,7 +17,7 @@ dependencies = []
 rd = "rd_cli.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/VirInvictus/rd-cli"
+Homepage = "https://github.com/VirInvictus/raindrop-cli"
 
 [tool.hatch.version]
 path = "VERSION"

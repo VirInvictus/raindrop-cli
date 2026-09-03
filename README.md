@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="logo.svg" alt="rd-cli" width="96" height="96">
+  <img src="logo.svg" alt="raindrop-cli" width="96" height="96">
 </p>
 
-# rd-cli
+# raindrop-cli
 
 A fast, dependency-free command-line client for [Raindrop.io](https://raindrop.io).
 Read, add, edit, reorganize, and remove your bookmarks (raindrops), collections,
@@ -10,7 +10,7 @@ tags, and highlights from the terminal, with designed ANSI output for humans and
 `--json` for scripts and AI agents.
 
 <p align="center">
-  <img src="docs/screenshots/list.png" alt="rd-cli listing a collection: bookmark ids, titles, and URLs in designed ANSI colour, followed by account stats">
+  <img src="docs/screenshots/list.png" alt="raindrop-cli listing a collection: bookmark ids, titles, and URLs in designed ANSI colour, followed by account stats">
 </p>
 
 - **Zero runtime dependencies.** Pure Python standard library (`urllib`, `json`,
@@ -47,7 +47,7 @@ tags, and highlights from the terminal, with designed ANSI output for humans and
 - [Exit codes](#exit-codes)
 - [System collection ids](#system-collection-ids)
 - [Rate limits and retries](#rate-limits-and-retries)
-- [Using rd-cli as a library](#using-rd-cli-as-a-library)
+- [Using raindrop-cli as a library](#using-raindrop-cli-as-a-library)
 - [Development](#development)
 - [License](#license)
 
@@ -79,8 +79,8 @@ one found:
 | -------- | ------ | ----- |
 | 1 | `RAINDROP_TOKEN` environment variable | Recommended for shells and CI. |
 | 2 | `RAINDROP_TEST_TOKEN` environment variable | Back-compat alias. |
-| 3 | `token` in `~/.config/rd-cli/config.toml` | Written by `rd config set-token`, `0600`. |
-| 4 | `RAINDROP_TOKEN` / `RAINDROP_TEST_TOKEN` in a `.env` file | `./.env`, then `~/.config/rd-cli/.env`. Real env vars always win. |
+| 3 | `token` in `~/.config/raindrop-cli/config.toml` | Written by `rd config set-token`, `0600`. |
+| 4 | `RAINDROP_TOKEN` / `RAINDROP_TEST_TOKEN` in a `.env` file | `./.env`, then `~/.config/raindrop-cli/.env`. Real env vars always win. |
 
 ```bash
 export RAINDROP_TOKEN=your-token-here       # option 1: environment
@@ -328,7 +328,7 @@ rd exists "https://example.com" "https://other.com"
 
 ### Pinboard
 
-rd-cli also speaks [Pinboard](https://pinboard.in), the other bookmarking
+raindrop-cli also speaks [Pinboard](https://pinboard.in), the other bookmarking
 service, through a `pinboard` (alias `pb`) command group. Pinboard's model is
 **flat**: bookmarks are keyed by their URL (there are no numeric ids and no
 collections), organized only by tags, with `toread` and `shared` flags and
@@ -457,7 +457,7 @@ Several commands accept a collection id, including these system pseudo-ids:
 
 ## Rate limits and retries
 
-The Raindrop API allows 120 requests per minute per user. rd-cli retries
+The Raindrop API allows 120 requests per minute per user. raindrop-cli retries
 automatically:
 
 - **429 (rate limited):** waits for the `Retry-After` header (integer seconds or
@@ -468,7 +468,7 @@ automatically:
 
 Each request also has a 30-second timeout.
 
-## Using rd-cli as a library
+## Using raindrop-cli as a library
 
 The HTTP client is a clean, dependency-free class you can import directly. Every
 endpoint is one method, and all requests go through a single retrying core.

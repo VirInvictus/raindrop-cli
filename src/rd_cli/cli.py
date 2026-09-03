@@ -638,7 +638,7 @@ def _add_misc_commands(sub, common):
 
 
 def _add_config_commands(sub, common):
-    c = sub.add_parser("config", help="manage rd-cli configuration")
+    c = sub.add_parser("config", help="manage raindrop-cli configuration")
     csub = c.add_subparsers(dest="subcommand", metavar="<action>", required=True)
     _p(
         csub,

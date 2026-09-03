@@ -161,7 +161,7 @@ tested, fully documented CLI.
   flat commands (`c-list`, `t-list`, `h-list`, ...) working as hidden aliases.
 - `--all` to auto-paginate list and highlight reads.
 - `rd config path|show|set-token`; token also resolvable from
-  `~/.config/rd-cli/config.toml` and `.env`, with `RAINDROP_TOKEN` as the
+  `~/.config/raindrop-cli/config.toml` and `.env`, with `RAINDROP_TOKEN` as the
   primary env var (`RAINDROP_TEST_TOKEN` still honored).
 - TTY-aware ANSI output (Kanagawa-ish palette): colour on a terminal, plain when
   piped, `NO_COLOR` and `--no-color` respected. Nested collection tree view and

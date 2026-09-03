@@ -1,4 +1,4 @@
-# rd-cli roadmap
+# raindrop-cli roadmap
 
 Newest phases at the bottom. Tick boxes when shipped.
 
@@ -77,7 +77,7 @@ portfolio conventions.
 
 ## Phase 5: a second backend, Pinboard (v0.2.0)
 
-Turned rd-cli from a Raindrop client into a two-service bookmark CLI, reusing
+Turned raindrop-cli from a Raindrop client into a two-service bookmark CLI, reusing
 the existing HTTP/output/config machinery.
 
 - [x] `PinboardClient`: stdlib `urllib`, `auth_token` query-param auth,

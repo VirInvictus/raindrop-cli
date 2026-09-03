@@ -33,7 +33,9 @@ from .client import _backoff, _encode_params, _to_api_error
 from .errors import APIError
 
 BASE_URL = "https://api.pinboard.in/v1"
-USER_AGENT = f"raindrop-cli/{__version__} (+https://github.com/VirInvictus/raindrop-cli)"
+USER_AGENT = (
+    f"raindrop-cli/{__version__} (+https://github.com/VirInvictus/raindrop-cli)"
+)
 
 # Pinboard asks for at least three seconds between calls for most endpoints.
 MIN_INTERVAL = 3.0

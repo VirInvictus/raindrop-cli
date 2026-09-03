@@ -30,7 +30,9 @@ from . import __version__
 from .errors import APIError, AuthError, NotFoundError, RateLimitError
 
 BASE_URL = "https://api.raindrop.io/rest/v1"
-USER_AGENT = f"raindrop-cli/{__version__} (+https://github.com/VirInvictus/raindrop-cli)"
+USER_AGENT = (
+    f"raindrop-cli/{__version__} (+https://github.com/VirInvictus/raindrop-cli)"
+)
 
 # System collection ids (see CLAUDE.md).
 ALL = 0

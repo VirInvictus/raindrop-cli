@@ -438,7 +438,7 @@ class RaindropClient:
     def search_covers(self, text: str) -> list[dict]:
         """Search the icon/cover library (grouped by provider)."""
         return self._request(
-            "GET", f"/collections/covers/{urllib.parse.quote(text)}"
+            "GET", f"/collections/covers/{urllib.parse.quote(text, safe='')}"
         ).get("items", [])
 
     def featured_covers(self) -> list[dict]:

@@ -263,3 +263,11 @@ def test_real_client_builds_a_separate_non_following_opener():
         isinstance(h, client_mod._NoRedirect) for h in c._noredirect_opener.handlers
     )
     assert not any(type(h) is client_mod._NoRedirect for h in c._opener.handlers)
+
+
+def test_search_covers_encodes_slashes():
+    c, opener, _ = make_client([{"items": []}])
+    c.search_covers("a/b c")
+    path = opener.last.full_url.split("rest/v1/")[1]
+    assert "covers/a%2Fb%20c" in path
+    assert "covers/a/b" not in path

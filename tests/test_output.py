@@ -79,3 +79,18 @@ def test_columns_alignment():
     lines = rendered.splitlines()
     # Both id columns padded to the same width -> titles start at same offset.
     assert lines[0].index("short") == lines[1].index("longer")
+
+
+def test_highlight_line_maps_raindrop_color_names(monkeypatch):
+    # configure() may have disabled the global flag on a non-tty earlier in
+    # the run; this test needs the escapes to exist.
+    monkeypatch.setattr(output, "_color_enabled", True)
+    line = output.format_highlight_line({"_id": 1, "color": "green", "text": "x"})
+    assert "\033[38;5;150m" in line  # the palette's green ("ok")
+    # Unknown and absent names fall back to muted, never raw color words.
+    unknown = output.format_highlight_line(
+        {"_id": 2, "color": "chartreuse", "text": "x"}
+    )
+    assert "chartreuse" not in unknown.split("x")[0]
+    muted = output.format_highlight_line({"_id": 3, "text": "x"})
+    assert "\033[2m" in muted

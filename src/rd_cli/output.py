@@ -28,6 +28,23 @@ _CODES = {
     "ok": "\033[38;5;150m",  # green — success
 }
 
+# Raindrop's highlight color names, mapped onto this module's palette keys.
+# Unknown names fall back to "muted".
+_HL_CODES = {
+    "blue": "id",
+    "brown": "tag",
+    "cyan": "url",
+    "gray": "muted",
+    "green": "ok",
+    "indigo": "id",
+    "orange": "star",
+    "pink": "star",
+    "purple": "id",
+    "red": "error",
+    "teal": "ok",
+    "yellow": "tag",
+}
+
 _color_enabled = True
 
 
@@ -201,7 +218,7 @@ def format_tags(items: list[dict]) -> str:
 
 
 def format_highlight_line(hl: dict) -> str:
-    marker = color("▍", hl.get("color", "muted"))
+    marker = color("▍", _HL_CODES.get(hl.get("color", ""), "muted"))
     ref = hl.get("raindropRef")
     hid = color(f"[{hl.get('_id')}]", "id")
     ref_str = color(f"rd:{ref}", "muted") if ref else ""

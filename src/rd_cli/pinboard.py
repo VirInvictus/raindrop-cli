@@ -266,6 +266,11 @@ class PinboardClient:
         toread = changes.get("toread")
         if toread is None:
             toread = current.get("toread") == "yes"
+        # Preserve the original save time: an edit is a read-modify-write of
+        # everything else, never a re-dating.
+        dt = changes.get("dt")
+        if dt is None:
+            dt = str(current.get("time") or "")
         return self.add_post(
             url,
             title,
@@ -274,4 +279,5 @@ class PinboardClient:
             replace=True,
             shared=shared,
             toread=toread,
+            dt=dt,
         )

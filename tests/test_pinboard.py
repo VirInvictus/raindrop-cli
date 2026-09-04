@@ -150,3 +150,26 @@ def test_dry_run_skips_writes_but_not_reads():
     assert opener.requests == []
     c.get_post("https://x")  # read: goes through
     assert len(opener.requests) == 1
+
+
+def test_edit_post_preserves_original_time():
+    c, opener, _ = make_client(
+        [
+            {"posts": [{"href": "https://a", "time": "2024-05-01T00:00:00Z"}]},
+            {"result_code": "done"},
+        ]
+    )
+    c.edit_post("https://a", tags=["new"])
+    url = opener.last.full_url
+    assert "dt=2024-05-01T00%3A00%3A00Z" in url
+
+
+def test_edit_post_dt_override_wins():
+    c, opener, _ = make_client(
+        [
+            {"posts": [{"href": "https://a", "time": "2024-05-01T00:00:00Z"}]},
+            {"result_code": "done"},
+        ]
+    )
+    c.edit_post("https://a", dt="2025-01-01T00:00:00Z")
+    assert "dt=2025-01-01T00%3A00%3A00Z" in opener.last.full_url

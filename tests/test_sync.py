@@ -138,3 +138,77 @@ def test_plan_sync_no_op_when_identical():
     ]
     plan = sync.plan_sync(raindrops, pb_posts, {}, {})
     assert plan.total == 0  # same tags, same (empty) note -> nothing to do
+
+
+# -- 0.6.0 robustness fixes ----------------------------------------------------
+
+
+def test_raindrop_to_pinboard_restores_toread_from_tag():
+    # The "toread" tag is the pinboard_to_raindrop convention; the way back
+    # must honor it instead of hardcoding False.
+    rd = {"link": "https://x.com", "title": "X", "tags": ["toread"]}
+    out = sync.raindrop_to_pinboard(rd, {})
+    assert out["toread"] is True
+    rd["tags"] = []
+    assert sync.raindrop_to_pinboard(rd, {})["toread"] is False
+
+
+def test_raindrop_to_pinboard_carries_created_dt():
+    rd = {"link": "https://x.com", "title": "X", "created": "2024-05-01T00:00:00Z"}
+    out = sync.raindrop_to_pinboard(rd, {})
+    assert out["dt"] == "2024-05-01T00:00:00Z"
+    assert sync.raindrop_to_pinboard({"link": "https://x.com"}, {})["dt"] == ""
+
+
+def test_raindrop_to_pinboard_tolerates_missing_link():
+    out = sync.raindrop_to_pinboard({"title": "no link"}, {})
+    assert out["url"] == ""
+    assert out["title"] == "no link"
+
+
+def test_pinboard_to_raindrop_tolerates_missing_href():
+    out = sync.pinboard_to_raindrop({"description": "orphan"}, {})
+    assert out["link"] == ""
+
+
+def test_plan_sync_skips_malformed_records():
+    raindrops = [
+        {"link": "https://good.example", "title": "Good", "tags": []},
+        {"title": "linkless"},  # malformed: no crash, no post
+    ]
+    pb_posts = [
+        {"href": "https://pb.example", "description": "PB", "tags": ""},
+        {"description": "hrefless"},  # malformed: no crash, no raindrop
+    ]
+    plan = sync.plan_sync(raindrops, pb_posts, {}, {})
+    assert [f["url"] for f in plan.to_pinboard] == ["https://good.example"]
+    assert [f["link"] for f in plan.to_raindrop] == ["https://pb.example"]
+
+
+def test_apply_plan_passes_dt_to_pinboard():
+    calls = []
+
+    class FakePB:
+        def add_post(
+            self, url, title, *, extended="", tags=None, shared=None, toread=None, dt=""
+        ):
+            calls.append({"url": url, "dt": dt})
+
+    class FakeRD:
+        def create_raindrop(self, *a, **k):
+            calls.append("rd")
+
+    plan = sync.SyncPlan()
+    plan.to_pinboard.append(
+        {
+            "url": "https://x.com",
+            "title": "X",
+            "extended": "",
+            "tags": [],
+            "shared": True,
+            "toread": False,
+            "dt": "2024-05-01T00:00:00Z",
+        }
+    )
+    sync.apply_plan(plan, FakeRD(), FakePB())
+    assert calls == [{"url": "https://x.com", "dt": "2024-05-01T00:00:00Z"}]

@@ -1,3 +1,45 @@
+# raindrop-cli Patch Notes
+
+## v0.6.0 (2026-09-04)
+
+**Phase 7 robustness sweep: the seven verified bugs, plus safe config
+writes.** Every fix regression-tested against the FakeOpener transport:
+
+*   **`rd filters` no longer crashes on bare-integer counts.** The API
+    documents counts as `{"count": N}` objects but some responses carry the
+    bare integer; both print now.
+*   **Pinboard timestamps survive edits and syncs.** `edit_post` preserves the
+    original save time (`dt=current.get("time")`), and raindrops pushed to
+    Pinboard carry their `created` timestamp as `dt`, so re-syncs never
+    re-date anything to now.
+*   **Highlight markers are colored.** Raindrop's highlight color names
+    (yellow, blue, green, ...) now map onto the CLI palette via
+    `_HL_CODES`; unknown names fall back to muted instead of printing the
+    raw name as a lookup key and losing the color entirely.
+*   **`toread` round-trips through sync.** `pinboard_to_raindrop` already
+    preserved unread state as a "toread" tag; `raindrop_to_pinboard` now
+    honors that tag instead of hardcoding `toread: False`.
+*   **Malformed records are skipped, not fatal.** A raindrop without a link
+    or a Pinboard post without an href no longer raises KeyError in
+    `plan_sync`; the record is skipped and the rest of the sync proceeds.
+*   **Cover searches encode slashes.** `search_covers` passes `safe=""` so
+    `a/b c` becomes `a%2Fb%20c` instead of breaking the URL path.
+*   **`rd open --json` no longer launches a browser.** JSON is the
+    agent/script surface; a browser launch is a side effect those callers
+    never asked for. Human mode and `--print` behave as before.
+*   **Config writes are atomic and escaped.** `config.toml` (which holds the
+    API tokens) is now written via temp-file + `os.replace`, chmod 0600
+    before the swap, and TOML values escape quotes and backslashes properly.
+
+Two Phase 7 boxes closed as already-shipped after code verification:
+human-mode exit codes (failure paths return 1 throughout commands.py) and
+multi-level completion (completion.py recurses into nested subcommands,
+test-pinned). The `.env` docstring-vs-roadmap conflict is resolved as
+documented behavior: `load_env_files` reads the first existing file on
+purpose.
+
+Suite: 144 passed, 1 skipped (was 127).
+
 ## v0.5.2 (2026-08-24)
 
 - **Build:** Replaced unittest with pytest in the CI workflow, restoring test coverage execution.

@@ -490,6 +490,12 @@ Construction options: `RaindropClient(token, *, base_url=..., timeout=30.0,
 max_retries=3, dry_run=False, opener=None, sleep=time.sleep)`. The `opener` and
 `sleep` hooks make it trivial to test without a network (see `tests/`).
 
+## Behavior notes
+
+- `rd open --json` resolves URLs and prints JSON only; it never launches a browser. Human mode (and `--print`) behave as before.
+- Sync preserves timestamps both ways: edits on Pinboard keep their original save time, and raindrops pushed to Pinboard carry their Raindrop `created` stamp. The unread flag round-trips too: a Pinboard post marked *to-read* becomes a `toread` tag on the raindrop, and it comes back as unread.
+- `rd filters` tolerates the API returning counts as bare integers or as `{"count": N}` objects.
+
 ## Development
 
 ```bash

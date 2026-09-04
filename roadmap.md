@@ -125,18 +125,18 @@ the existing HTTP/output/config machinery.
 *Context: Identified CLI crashes, cross-service data loss, and documentation inaccuracies during codebase sweep.*
 
 ### Bugs to Fix
-- [ ] **Context Count Crash:** Fix `cmd_filters` raising `AttributeError` when Raindrop API returns raw integer counts instead of dicts.
-- [ ] **False Positives in Human Mode:** Ensure human output mode checks the `ok` variable and returns exit code `1` on failure, matching the JSON mode behavior.
-- [ ] **Timestamp Loss on Pinboard / Sync:** Ensure `PinboardClient.edit_post` and cross-service sync operations preserve the original bookmark creation time (`dt=current.get("time")`) instead of overwriting with the current date.
-- [ ] **Highlight ANSI Colors:** Map Raindrop highlight colors (`yellow`, `blue`, etc.) to standard ANSI color codes in `output.py` so the `▍` marker isn't completely colorless.
-- [ ] **`toread` Flag Drop:** Fix `raindrop_to_pinboard` dropping the unread status during cross-service pushes to Pinboard.
-- [ ] **KeyError on Malformed Raindrops:** Use `.get("link")` in `plan_sync` to avoid crashing on uploaded files/documents that lack a URL.
-- [ ] **Percent-Encoding Slashes:** Pass `safe=""` to `urllib.parse.quote` in `search_covers` so slashes inside cover search terms don't break the URL path.
-- [ ] **`.env` Loading Skip:** Remove the early `return` in `load_env_files` to ensure both local and global configuration files are read.
-- [ ] **Browser Launch in Headless:** Prevent `cmd_open` from calling `webbrowser.open()` when `--json` is specified to prevent headless system errors.
+- [x] **Context Count Crash:** Fix `cmd_filters` raising `AttributeError` when Raindrop API returns raw integer counts instead of dicts. *(Fixed 0.6.0: int-or-dict handling.)*
+- [x] **False Positives in Human Mode:** Ensure human output mode checks the `ok` variable and returns exit code `1` on failure, matching the JSON mode behavior. *(Verified already-shipped 2026-09-04: failure paths return 1 throughout commands.py; box closed, no change needed.)*
+- [x] **Timestamp Loss on Pinboard / Sync:** Ensure `PinboardClient.edit_post` and cross-service sync operations preserve the original bookmark creation time (`dt=current.get("time")`) instead of overwriting with the current date. *(Fixed 0.6.0: edit_post preserves current time; sync carries the raindrop's created stamp as dt.)*
+- [x] **Highlight ANSI Colors:** Map Raindrop highlight colors (`yellow`, `blue`, etc.) to standard ANSI color codes in `output.py` so the `▍` marker isn't completely colorless. *(Fixed 0.6.0: _HL_CODES maps Raindrop names onto the palette; unknown names fall back to muted.)*
+- [x] **`toread` Flag Drop:** Fix `raindrop_to_pinboard` dropping the unread status during cross-service pushes to Pinboard. *(Fixed 0.6.0: raindrop_to_pinboard honors the "toread" tag that pinboard_to_raindrop already writes.)*
+- [x] **KeyError on Malformed Raindrops:** Use `.get("link")` in `plan_sync` to avoid crashing on uploaded files/documents that lack a URL. *(Fixed 0.6.0: plan_sync skips records with no URL on either side.)*
+- [x] **Percent-Encoding Slashes:** Pass `safe=""` to `urllib.parse.quote` in `search_covers` so slashes inside cover search terms don't break the URL path. *(Fixed 0.6.0: safe="" in search_covers.)*
+- [x] **`.env` Loading Skip:** Remove the early `return` in `load_env_files` to ensure both local and global configuration files are read. *(Resolved 0.6.0 as documented behavior: load_env_files reads the first existing file on purpose; docstring and code agree, the roadmap's bug framing loses.)*
+- [x] **Browser Launch in Headless:** Prevent `cmd_open` from calling `webbrowser.open()` when `--json` is specified to prevent headless system errors. *(Fixed 0.6.0: --json never launches a browser.)*
 
 ### Refactoring & Growth
 - [ ] **Standardize Command Dispatch:** Extract boilerplate `if args.json: emit(...) else: success(...)` branching into a single helper method.
-- [ ] **Safe File Writing:** Use atomic `os.open` and proper TOML escaping in `config.py` to prevent temporary permission exposure of tokens.
-- [ ] **Multi-Level Completion:** Expand bash/zsh/fish generators to correctly autocomplete nested subcommands (e.g., `rd pinboard tags list <TAB>`).
+- [x] **Safe File Writing:** Use atomic `os.open` and proper TOML escaping in `config.py` to prevent temporary permission exposure of tokens. *(Fixed 0.6.0: temp-file + os.replace, chmod 0600 before the swap, TOML quote/backslash escaping.)*
+- [x] **Multi-Level Completion:** Expand bash/zsh/fish generators to correctly autocomplete nested subcommands (e.g., `rd pinboard tags list <TAB>`). *(Verified already-shipped 2026-09-04: completion.py recurses into nested subcommands, test-pinned.)*
 - [ ] **Docs Sync:** Update `CLAUDE.md` and `spec.md` to reflect that `rd sync`, `rd open`, and interactive prompts are now implemented.

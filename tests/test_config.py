@@ -122,3 +122,21 @@ def test_pinboard_token_missing_raises(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     with pytest.raises(ConfigError):
         config.resolve_pinboard_token()
+
+
+def test_write_config_escapes_quotes_and_backslashes(monkeypatch, tmp_path):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    config._write_config_key("pinboard_token", 'has "quote" and \\ back')
+    text = (tmp_path / "raindrop-cli" / "config.toml").read_text()
+    import tomllib
+
+    parsed = tomllib.loads(text)
+    assert parsed["pinboard_token"] == 'has "quote" and \\ back'
+
+
+def test_write_config_is_atomic_and_private(monkeypatch, tmp_path):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    path = config._write_config_key("pinboard_token", "TOK")
+    # No temp file survives the swap, and the config is owner-only.
+    assert not (path.parent / (path.name + ".tmp")).exists()
+    assert (stat.S_IMODE(path.stat().st_mode) & 0o777) == 0o600

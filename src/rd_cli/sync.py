@@ -69,7 +69,10 @@ def _slug(title: str) -> str:
 
 
 def raindrop_to_pinboard(rd: dict, coll_title_by_id: dict[int, str]) -> dict:
-    """Fields for creating this raindrop on Pinboard."""
+    """Fields for creating this raindrop on Pinboard. The "toread" tag (the
+    pinboard_to_raindrop convention) restores Pinboard's unread state, and the
+    raindrop's created timestamp rides along as ``dt`` so re-syncs never reset
+    it to now."""
     tags = list(rd.get("tags") or [])
     cid = (rd.get("collection") or {}).get("$id")
     title = coll_title_by_id.get(cid) if cid is not None else None
@@ -80,13 +83,15 @@ def raindrop_to_pinboard(rd: dict, coll_title_by_id: dict[int, str]) -> dict:
     if rd.get("important") and "important" not in tags:
         tags.append("important")
     note = (rd.get("note") or rd.get("excerpt") or "").strip()
+    link = rd.get("link") or ""
     return {
-        "url": rd["link"],
-        "title": rd.get("title") or rd["link"],
+        "url": link,
+        "title": rd.get("title") or link,
         "extended": note,
         "tags": tags,
-        "toread": False,
+        "toread": "toread" in tags,
         "shared": True,
+        "dt": rd.get("created") or "",
     }
 
 
@@ -104,9 +109,10 @@ def pinboard_to_raindrop(pb: dict, coll_id_by_slug: dict[str, int]) -> dict:
             remaining.append(t)
     if pb.get("toread") == "yes" and "toread" not in remaining:
         remaining.append("toread")
+    href = pb.get("href") or ""
     return {
-        "link": pb["href"],
-        "title": pb.get("description") or pb["href"],
+        "link": href,
+        "title": pb.get("description") or href,
         "note": (pb.get("extended") or "").strip(),
         "tags": remaining,
         "collection_id": collection_id,
@@ -158,7 +164,10 @@ def plan_sync(
     rd_by_norm: dict[str, dict] = {}
     rd_dupes = 0
     for rd in raindrops:
-        key = normalize_url(rd["link"])
+        link = rd.get("link")
+        if not link:
+            continue  # malformed record: no URL to key on
+        key = normalize_url(link)
         if key in rd_by_norm:
             rd_dupes += 1
         else:
@@ -166,7 +175,10 @@ def plan_sync(
     pb_by_norm: dict[str, dict] = {}
     pb_dupes = 0
     for pb in pb_posts:
-        key = normalize_url(pb["href"])
+        href = pb.get("href")
+        if not href:
+            continue  # malformed record: no URL to key on
+        key = normalize_url(href)
         if key in pb_by_norm:
             pb_dupes += 1
         else:
@@ -175,6 +187,8 @@ def plan_sync(
     plan = SyncPlan(rd_dupes=rd_dupes, pb_dupes=pb_dupes)
     for key, rd in rd_by_norm.items():
         if key not in pb_by_norm and rd_keep(rd):
+            if not rd.get("link"):
+                continue  # malformed record: nothing to post
             plan.to_pinboard.append(raindrop_to_pinboard(rd, coll_title_by_id))
     for key, pb in pb_by_norm.items():
         rd = rd_by_norm.get(key)
@@ -223,6 +237,7 @@ def apply_plan(plan: SyncPlan, rd_client: Any, pb_client: Any) -> dict[str, int]
             tags=fields["tags"],
             shared=fields["shared"],
             toread=fields["toread"],
+            dt=fields.get("dt", ""),
         )
         counts["added_pinboard"] += 1
     for fields in plan.to_raindrop:

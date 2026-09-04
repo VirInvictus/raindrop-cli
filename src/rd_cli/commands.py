@@ -142,7 +142,9 @@ def cmd_open(client: RaindropClient, args: Any) -> int:
         for entry in resolved:
             print(entry["url"])
 
-    if not args.print_url:
+    # --json is the agent/script surface: resolving the URLs is the job, and
+    # a browser launch is a side effect those callers never asked for.
+    if not args.json and not args.print_url:
         for entry in resolved:
             # Failing to launch is not fatal: on a headless box there may be no
             # browser at all, and the URL is still worth surfacing.
@@ -759,7 +761,10 @@ def cmd_filters(client: RaindropClient, args: Any) -> int:
         output.emit_json(filters)
         return 0
     for key in ("broken", "duplicates", "important", "notag"):
-        count = (filters.get(key) or {}).get("count")
+        raw = filters.get(key)
+        # The API documents these as {"count": N} objects, but some responses
+        # carry the bare integer; both are fine to print.
+        count = raw.get("count") if isinstance(raw, dict) else raw
         if count is not None:
             print(f"  {output.color(key + ':', 'muted')} {count}")
     types = filters.get("types") or []

@@ -149,8 +149,13 @@ def _write_config_key(key: str, value: str) -> Path:
         if other == key:
             continue
         lines.append(_toml_line(other, val))
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    path.chmod(0o600)
+    # Atomic write: a crash mid-write must not truncate the config (the API
+    # tokens live here). chmod the temp before the swap so the file is never
+    # readable by anyone else, even for a moment.
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    tmp.chmod(0o600)
+    os.replace(tmp, path)
     return path
 
 
@@ -159,4 +164,5 @@ def _toml_line(key: str, value: object) -> str:
         return f"{key} = {str(value).lower()}"
     if isinstance(value, (int, float)):
         return f"{key} = {value}"
-    return f'{key} = "{value}"'
+    escaped = str(value).replace("\\", "\\\\").replace('"', '\\"')
+    return f'{key} = "{escaped}"'

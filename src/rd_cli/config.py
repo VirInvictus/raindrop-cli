@@ -60,16 +60,25 @@ def parse_env(text: str) -> dict[str, str]:
     return result
 
 
-def load_env_files(paths: list[Path] | None = None) -> None:
-    """Load the first existing ``.env`` file into ``os.environ`` (non-clobbering)."""
+def load_env_files(paths: list[Path] | None = None) -> dict[str, str]:
+    """Load the first existing ``.env`` file into ``os.environ`` (non-clobbering).
+
+    Returns the keys this file injected, so callers can tell ``.env``-sourced
+    values from real environment variables; the documented resolution order
+    (env, config.toml, .env) needs that distinction.
+    """
     if paths is None:
         paths = [Path.cwd() / ".env", config_dir() / ".env"]
+    injected: dict[str, str] = {}
     for path in paths:
         if not path.is_file():
             continue
         for key, value in parse_env(path.read_text(encoding="utf-8")).items():
-            os.environ.setdefault(key, value)
-        return
+            if key not in os.environ:
+                os.environ[key] = value
+                injected[key] = value
+        return injected
+    return injected
 
 
 def read_config() -> dict:
@@ -84,15 +93,39 @@ def read_config() -> dict:
         raise ConfigError(f"Could not read {path}: {exc}") from exc
 
 
-def resolve_token() -> str:
-    """Resolve the access token, or raise :class:`ConfigError` if none is found."""
-    load_env_files()
-    for var in ENV_VARS:
+def _resolve_secret(
+    injected: dict[str, str], env_vars: list[str], config_value: object
+) -> str | None:
+    """Documented precedence: env var, then config.toml, then ``.env``.
+
+    Keys in ``injected`` came from a ``.env`` file, so they skip the env
+    round and only win when config has nothing; a real environment
+    variable still beats everything.
+    """
+    for var in env_vars:
         token = os.environ.get(var)
+        if token and var not in injected:
+            return token
+    if isinstance(config_value, str) and config_value.strip():
+        return config_value
+    for var in env_vars:
+        token = injected.get(var)
         if token:
-            return token.strip()
-    token = read_config().get("token")
-    if isinstance(token, str) and token.strip():
+            return token
+    return None
+
+
+def resolve_token() -> str:
+    """Resolve the access token, or raise :class:`ConfigError` if none is found.
+
+    Precedence is the documented one: environment variable, then
+    ``config.toml``, then ``.env``. A ``.env`` value therefore loses to
+    ``rd config set-token``, so rotating the token is never silently
+    overridden by a stale ``.env``.
+    """
+    injected = load_env_files()
+    token = _resolve_secret(injected, ENV_VARS, read_config().get("token"))
+    if token:
         return token.strip()
     raise ConfigError(
         "No Raindrop token found. Set RAINDROP_TOKEN, add it to "
@@ -108,13 +141,11 @@ def resolve_pinboard_token() -> str:
     Same precedence as :func:`resolve_token` but for the ``PINBOARD_TOKEN`` /
     ``PINBOARD_API_TOKEN`` env vars and the ``pinboard_token`` config key.
     """
-    load_env_files()
-    for var in PINBOARD_ENV_VARS:
-        token = os.environ.get(var)
-        if token:
-            return token.strip()
-    token = read_config().get("pinboard_token")
-    if isinstance(token, str) and token.strip():
+    injected = load_env_files()
+    token = _resolve_secret(
+        injected, PINBOARD_ENV_VARS, read_config().get("pinboard_token")
+    )
+    if token:
         return token.strip()
     raise ConfigError(
         "No Pinboard token found. Set PINBOARD_TOKEN, add it to "

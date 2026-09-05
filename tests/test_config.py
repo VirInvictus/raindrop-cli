@@ -57,6 +57,41 @@ def test_resolve_token_missing_raises(monkeypatch, tmp_path):
         config.resolve_token()
 
 
+def test_resolve_token_config_beats_dotenv(monkeypatch, tmp_path):
+    # The documented order is env, config.toml, .env: rotating the token
+    # via `rd config set-token` must win over a stale ./.env.
+    monkeypatch.delenv("RAINDROP_TOKEN", raising=False)
+    monkeypatch.delenv("RAINDROP_TEST_TOKEN", raising=False)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("RAINDROP_TOKEN=stale\n")
+    cfg_dir = tmp_path / "raindrop-cli"
+    cfg_dir.mkdir()
+    (cfg_dir / "config.toml").write_text('token = "rotated"\n')
+    assert config.resolve_token() == "rotated"
+
+
+def test_resolve_token_dotenv_still_works_without_config(monkeypatch, tmp_path):
+    monkeypatch.delenv("RAINDROP_TOKEN", raising=False)
+    monkeypatch.delenv("RAINDROP_TEST_TOKEN", raising=False)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("RAINDROP_TOKEN=fromfile\n")
+    assert config.resolve_token() == "fromfile"
+
+
+def test_resolve_pinboard_token_config_beats_dotenv(monkeypatch, tmp_path):
+    monkeypatch.delenv("PINBOARD_TOKEN", raising=False)
+    monkeypatch.delenv("PINBOARD_API_TOKEN", raising=False)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("PINBOARD_TOKEN=stale:OLD\n")
+    cfg_dir = tmp_path / "raindrop-cli"
+    cfg_dir.mkdir()
+    (cfg_dir / "config.toml").write_text('pinboard_token = "fresh:NEW"\n')
+    assert config.resolve_pinboard_token() == "fresh:NEW"
+
+
 def test_env_file_does_not_clobber_real_env(monkeypatch, tmp_path):
     monkeypatch.setenv("RAINDROP_TOKEN", "real")
     monkeypatch.chdir(tmp_path)

@@ -41,10 +41,12 @@ portfolio conventions.
 
 ## Phase 2: authentication and convenience (planned)
 
-- [ ] OAuth2 3-legged flow (`rd auth login`): local redirect catcher, code
+- [x] OAuth2 3-legged flow (`rd auth login`): local redirect catcher, code
+  *(RETIRED 2026-09-12 (Brandon): the auth trio retires and the spec's non-goal stands; the non-expiring token makes the refresh machinery moot.)*
       exchange, token + refresh_token stored in `config.toml`.
 - [ ] Automatic token refresh on `401` when a refresh token is present.
-- [ ] Optional secret storage via the Secret Service (`oo7`/keyring) instead of
+- [x] Optional secret storage via the Secret Service (`oo7`/keyring) instead of
+  *(DECLINED 2026-09-12 (Brandon): config.toml stays the hardened plaintext store; the zero-dependency stance holds.)*
       plaintext `config.toml` (ask before adding the dep).
 - [x] `rd open <id>` to launch a raindrop (or its permanent copy) in the browser.
       Takes several ids, `--cache` for the permanent copy (read off the `307`
@@ -107,7 +109,8 @@ the existing HTTP/output/config machinery.
       narrows what is written; matching uses the full sets (no re-import of an
       out-of-scope item that already exists on the other side).
 - [x] `--dry-run` plan preview; pure, unit-tested planner.
-- [ ] Delete propagation + conflict resolution via a persistent manifest
+- [x] Delete propagation + conflict resolution via a persistent manifest
+  *(CONFIRMED DEFERRED 2026-09-12 (Brandon): additive-first sync is the standing design; Pinboard deletes are permanent.)*
       (three-way diff). Deferred: it needs stored sync state and carries real
       data-loss risk (Pinboard deletes are permanent).
 - [ ] A `--reconcile-dupes` pass that merges near-duplicate URLs *within* a
@@ -140,3 +143,7 @@ the existing HTTP/output/config machinery.
 - [x] **Safe File Writing:** Use atomic `os.open` and proper TOML escaping in `config.py` to prevent temporary permission exposure of tokens. *(Fixed 0.6.0: temp-file + os.replace, chmod 0600 before the swap, TOML quote/backslash escaping.)*
 - [x] **Multi-Level Completion:** Expand bash/zsh/fish generators to correctly autocomplete nested subcommands (e.g., `rd pinboard tags list <TAB>`). *(Verified already-shipped 2026-09-04: completion.py recurses into nested subcommands, test-pinned.)*
 - [ ] **Docs Sync:** Update `CLAUDE.md` and `spec.md` to reflect that `rd sync`, `rd open`, and interactive prompts are now implemented.
+
+## Recorded 2026-09-12 (Brandon)
+
+rd.json disposition: the file was deleted (never tracked) and `rd.json` now sits in .gitignore as insurance against recurrence. The landmine note closes.

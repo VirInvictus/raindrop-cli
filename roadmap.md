@@ -42,12 +42,12 @@ portfolio conventions.
 ## Phase 2: authentication and convenience (planned)
 
 - [x] OAuth2 3-legged flow (`rd auth login`): local redirect catcher, code
-  *(RETIRED 2026-09-12 (Brandon): the auth trio retires and the spec's non-goal stands; the non-expiring token makes the refresh machinery moot.)*
       exchange, token + refresh_token stored in `config.toml`.
+  *(RETIRED 2026-09-12 (Brandon): the auth trio retires and the spec's non-goal stands; the non-expiring token makes the refresh machinery moot.)*
 - [ ] Automatic token refresh on `401` when a refresh token is present.
 - [x] Optional secret storage via the Secret Service (`oo7`/keyring) instead of
-  *(DECLINED 2026-09-12 (Brandon): config.toml stays the hardened plaintext store; the zero-dependency stance holds.)*
       plaintext `config.toml` (ask before adding the dep).
+  *(DECLINED 2026-09-12 (Brandon): config.toml stays the hardened plaintext store; the zero-dependency stance holds.)*
 - [x] `rd open <id>` to launch a raindrop (or its permanent copy) in the browser.
       Takes several ids, `--cache` for the permanent copy (read off the `307`
       `Location`, PRO only), and `--print` to emit the URL instead of launching.

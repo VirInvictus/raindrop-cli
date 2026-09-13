@@ -202,10 +202,13 @@ rd.json disposition: the file was deleted (never tracked) and `rd.json` now sits
   (get_collection_highlights: zero callers); Pinboard date filters +
   last_update() sync fast-path (built, unwired); backups download
   --latest; --reconcile-dupes stays deliberately deferred.
-- [ ] **GitHub presentation (workspace batch):** description omits
+- [x] **GitHub presentation (workspace batch):** description omits
   Pinboard + sync (the differentiators; replacement drafted); homepage
   404s (codex renamed - /codex/raindrop-cli/ is 200); Releases for
   v0.6.0; topics add pinboard/sync, drop the python triplication; wiki
-  off. *(The v0.6.1 GitHub Release is part of this cut; the repo
-  metadata pass (description/homepage/topics) rides the workspace
-  batch.)*
+  off. *(Applied 2026-09-13 with the v0.6.1 cut: description now names
+  Pinboard + sync, homepage points at the renamed codex page (verified
+  200; the old /codex/rd-cli/ path confirmed 404), topics gained
+  pinboard/sync and lost the python3/python-311 duplicates, the first
+  GitHub Release (v0.6.1, verbatim patchnotes body) exists, and the
+  empty wiki is off.)*

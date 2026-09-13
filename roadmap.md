@@ -147,3 +147,45 @@ the existing HTTP/output/config machinery.
 ## Recorded 2026-09-12 (Brandon)
 
 rd.json disposition: the file was deleted (never tracked) and `rd.json` now sits in .gitignore as insurance against recurrence. The landmine note closes.
+
+## New findings 2026-09-12 (six-lens full audit; detail: audit/FULL-AUDIT-2026-09-12.md, Wave 19)
+
+- [ ] **HIGH: the token-resolution fix (339baa9) breaks in dual-token
+      processes.** load_env_files mutates os.environ and reports only keys
+      injected this call; in cmd_sync, resolve_token() runs first, so
+      resolve_pinboard_token() then sees the .env value as a real env var
+      and a stale ./.env token beats rd config set-pinboard-token - the
+      exact bug the commit claims to fix. Persist the injected-keys
+      registry across calls (module-level), and add a both-resolvers
+      regression test. Must land in 0.6.1.
+- [ ] **HIGH: rd sync --json prints human plan lines before the JSON
+      document** (only --json --dry-run is clean). Guard the plan lines on
+      not args.json; add cmd_sync CLI tests (none exist).
+- [ ] **0.6.1 lane (go-granted, now precise):** the dispatch helper (57
+      if-args.json branches -> one emit chokepoint), the spec.md docs sync
+      (Status 0.3.0; non-goals list shipped features; open missing from
+      the verb list; the OAuth2 retirement wording x3 + the orphaned
+      refresh box), the token fix + both HIGHs, the merge-branch dt fix
+      (sync re-dates Pinboard posts today), then cut and publish.
+- [ ] **More code findings:** shared:true hardcoded (pushes are public
+  regardless of account default); iter_* truncate at perpage>50; config
+  show --json masks (README says raw - keep masked, fix README); explicit
+  ids + --from silently ignores the ids (reject the combination);
+  TimeoutError escapes the retry core on 3.11+; batch add ignores six
+  flags; aliases visible in --help despite SUPPRESS claims; NO_COLOR
+  empty-string deviation; CJK width math; _toml_line corrupts nested
+  config values. Full list in the ledger.
+- [ ] **The rename broke Brandon's own config path:**
+  ~/.config/rd-cli/config.toml holds both tokens; config_dir() now
+  returns ~/.config/raindrop-cli (renamed Sep 3) - no migration ran, so
+  the installed rd has no token source. A one-time migration (or reading
+  the old path as fallback) belongs in 0.6.1.
+- [ ] **Blitz candidates:** highlights -c + source titles
+  (get_collection_highlights: zero callers); Pinboard date filters +
+  last_update() sync fast-path (built, unwired); backups download
+  --latest; --reconcile-dupes stays deliberately deferred.
+- [ ] **GitHub presentation (workspace batch):** description omits
+  Pinboard + sync (the differentiators; replacement drafted); homepage
+  404s (codex renamed - /codex/raindrop-cli/ is 200); Releases for
+  v0.6.0; topics add pinboard/sync, drop the python triplication; wiki
+  off.

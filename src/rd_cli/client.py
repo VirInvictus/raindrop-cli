@@ -138,12 +138,17 @@ class RaindropClient:
                     attempt += 1
                     continue
                 raise _to_api_error(exc) from exc
-            except urllib.error.URLError as exc:
+            except (urllib.error.URLError, TimeoutError) as exc:
+                # TimeoutError: socket.timeout on 3.10+, raised bare by the
+                # response read rather than wrapped in a URLError. Either way
+                # it is a transient transport failure: retry, then give up
+                # with the typed error.
+                reason = exc.reason if isinstance(exc, urllib.error.URLError) else exc
                 if attempt < self.max_retries:
                     self._sleep(_backoff(attempt))
                     attempt += 1
                     continue
-                raise APIError(f"Network error: {exc.reason}") from exc
+                raise APIError(f"Network error: {reason}") from exc
 
     def _retry_wait(self, exc: urllib.error.HTTPError, attempt: int) -> float | None:
         """Return seconds to wait before retrying, or ``None`` if not retryable."""

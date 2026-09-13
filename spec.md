@@ -5,7 +5,7 @@ document defines behavior that callers (humans and scripts) may rely on. The
 API-side reference (endpoints, fields, quirks) lives in `CLAUDE.md`; this file
 covers the CLI contract.
 
-Version: see `VERSION`. Status: `0.3.0`. Raindrop is the primary backend;
+Version: see `VERSION`. Status: `0.6.1`. Raindrop is the primary backend;
 Pinboard support (`rd pinboard`) and a two-way additive `rd sync` between the two
 services landed in 0.2.0 and 0.3.0.
 
@@ -22,13 +22,16 @@ services landed in 0.2.0 and 0.3.0.
 
 ## Non-goals (this version)
 
-- OAuth2 server flow and token refresh (test token only for now).
+- OAuth2 login flow and token refresh, retired 2026-09 (Brandon): the
+  non-expiring test token is the standing auth model and the refresh machinery
+  is moot. Secret Service storage was declined for the same reason (it would
+  also break the zero-dependency stance).
 - Collaboration/sharing endpoints and destructive `PUT /user` changes.
 - A TUI or a config-profile system. (Shell completion shipped in 0.5.0 and is no
   longer a non-goal; it is generated from the parser, so it adds no dependency
   and nothing to maintain by hand.)
-- Sharing/collaborator endpoints and the permanent-copy/cache PRO endpoint.
-- Interactive confirmation prompts (bulk safety is via `--dry-run` for now).
+- Sync delete propagation and conflict resolution (they need a persistent sync
+  manifest; Pinboard deletes are permanent, so the additive-only design stands).
 
 ## Authentication
 
@@ -39,13 +42,22 @@ The token is resolved by `config.resolve_token()` in this order; first hit wins:
 3. `token` key in `$XDG_CONFIG_HOME/raindrop-cli/config.toml`
    (default `~/.config/raindrop-cli/config.toml`).
 4. `RAINDROP_TOKEN` / `RAINDROP_TEST_TOKEN` in a `.env` file: `./.env` first,
-   then `$XDG_CONFIG_HOME/raindrop-cli/.env`.
+   then `$XDG_CONFIG_HOME/raindrop-cli/.env`, then the pre-rename
+   `$XDG_CONFIG_HOME/rd-cli/.env`.
 
 Real environment variables always win over `.env` (the reader is
 non-clobbering). `rd config set-token <token>` writes the config file with
 `0600` permissions. If no token is found, the CLI exits `1` with a message
 pointing at the integrations page. Commands that do not touch the network
 (`rd config *`) never require a token.
+
+**Pre-rename config fallback.** The package was `rd-cli` until the September
+2026 rename, which shipped without a migration. When
+`$XDG_CONFIG_HOME/raindrop-cli/config.toml` does not exist, the old
+`$XDG_CONFIG_HOME/rd-cli/config.toml` is read as a fallback (and the old
+`.env` is the last `.env` candidate). Writes always go to the current path and
+preserve every key they read, so the first `rd config set-*` repatriates the
+legacy file wholesale. `rd config path` prints the file actually in effect.
 
 The **Pinboard** commands (`rd pinboard *`) and `rd sync` additionally need a
 Pinboard token, resolved the same way by `config.resolve_pinboard_token()`:
@@ -75,6 +87,10 @@ UTF-8 JSON document (indented) on stdout, and nothing else. Shapes:
   `collections view`).
 - Boolean-result commands emit `{"result": <bool>}` (`rm`, `collections rm`,
   `tags rm`, ...).
+- `rd sync` emits the plan document (`to_pinboard`, `to_raindrop`, `merges`,
+  `rd_dupes`, `pb_dupes`) under `--dry-run`, and the applied counts
+  (`added_pinboard`, `added_raindrop`, `merged`) on a real run. It is the only
+  document either way; the human plan lines never precede it.
 - Errors emit `{"error": "<message>"}` on stdout and still exit non-zero.
 
 JSON objects are passed through from the API unchanged. Per Raindrop's docs,
@@ -90,6 +106,9 @@ names and their meaning:
 - `list` / `search` — read raindrops (`--all` paginates; `-c/--collection`,
   `-s/--search`, `--sort`, `--page`, `--perpage`, `-n/--nested`, `-d/--detailed`).
 - `view <id>` — one raindrop in detail.
+- `open <ids...>` — open a raindrop's URL in the browser; `--cache` (alias
+  `--permanent`) opens the permanent copy instead (PRO), `--print` emits the
+  URL and launches nothing. `--json` resolves and prints without launching.
 - `add <url>` — create (auto-parses metadata unless `--no-parse`; default
   collection is Unsorted, `-1`). `--file`/`--stdin` batch-creates many URLs.
 - `edit <id>` — update fields (`--important`/`--not-important` tri-state).
@@ -106,10 +125,22 @@ names and their meaning:
 **id-list vs scope.** `mv`/`rm`/`tag` with explicit ids loop the single-item
 endpoints (correct regardless of each item's collection). With `--from` they use
 the batch endpoints, which require a real source collection (`0` is unsupported)
-and only affect raindrops actually in that scope.
+and only affect raindrops actually in that scope. Explicit ids and `--from` are
+mutually exclusive: the batch endpoints ignore an id list, so passing both is a
+usage error, never a silent scope.
 
 **`--dry-run`** (global) logs the method and payload of every write to stderr
 and makes no API call; reads still run, so a plan can be built safely first.
+
+**Confirmation.** Destructive operations whose blast radius is unbounded
+(scope mode `rm`/`mv`/`tag --clear`) or irreversible (`rm --permanent`,
+`collections rm`, `collections empty-trash`, `tags rm`) prompt on stderr
+first; everything else runs unprompted (removing by id to Trash is
+recoverable, appending tags is additive). `-y`/`--yes` pre-answers every
+prompt and `RD_ASSUME_YES=1` does the same for scripts and cron;
+`--dry-run` bypasses prompts entirely because it writes nothing. A
+non-interactive stdin refuses rather than prompting: blocking would hang a
+script and defaulting to yes would delete data nobody agreed to.
 
 Back-compat aliases `c-list`, `c-add`, `c-rm`, `t-list`, `t-rm`, `h-list`,
 `h-add`, `h-rm` remain valid and behave as their grouped equivalents.
@@ -139,8 +170,9 @@ are out of scope for this version.
   `errorMessage` when present.
 - `429` retries honor `Retry-After` (integer seconds or an HTTP-date) and
   `X-RateLimit-Reset` (capped at 60s); `5xx` and transient transport errors
-  retry with exponential backoff. Retries are bounded (`max_retries`, default
-  3). `4xx` other than 429 is never retried.
+  (including socket timeouts, which arrive bare on Python 3.10+) retry with
+  exponential backoff. Retries are bounded (`max_retries`, default 3). `4xx`
+  other than 429 is never retried.
 - Request timeout defaults to 30s.
 
 ## Exit codes

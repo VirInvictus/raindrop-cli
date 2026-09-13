@@ -89,8 +89,15 @@ echo 'RAINDROP_TOKEN=your-token-here' > .env  # option 4: local .env
 ```
 
 `XDG_CONFIG_HOME` is honoured, so the config directory follows your XDG setup.
-Full OAuth2 (login flow + refresh) is planned but not yet implemented; the test
-token covers single-user needs.
+
+**Upgrading from a pre-0.6 install?** The package was named `rd-cli` before
+September 2026, and the rename did not migrate configs. If
+`~/.config/raindrop-cli/config.toml` does not exist yet, your old
+`~/.config/rd-cli/config.toml` is read automatically; the first
+`rd config set-token` / `set-pinboard-token` copies every key to the new path.
+
+OAuth2 is not planned: the login flow and refresh machinery were retired
+(2026-09) because the test token does not expire and covers single-user use.
 
 For the optional **Pinboard** support (see [Pinboard](#pinboard) and
 [Sync](#sync-raindrop-and-pinboard)), add a Pinboard API token, format
@@ -232,6 +239,9 @@ Notes:
   current tags, computes the new set, and writes it back). In scope mode the API
   can only **append** (`--add`) or **clear all** (`--clear`); to strip one
   specific tag from every raindrop, use `rd tags rm <tag>`.
+- Explicit ids and `--from` are mutually exclusive: the batch endpoints ignore
+  an id list, so `rd rm 5 --from 111` would trash all of collection 111 and
+  never touch id 5. Passing both is rejected as a usage error.
 - `rm --permanent` deletes via the documented two-step (to Trash, then from
   Trash). Deleting a raindrop that is already in Trash also removes it
   permanently.
@@ -397,8 +407,8 @@ manifest) are intentionally not implemented yet; see `roadmap.md`.
 
 | Command | Description |
 | ------- | ----------- |
-| `rd config path` | Print the config file path. |
-| `rd config show` | Show config (tokens are masked). Add `--json` for raw. |
+| `rd config path` | Print the config file path (the file actually in effect, including a pre-rename fallback). |
+| `rd config show` | Show config; tokens are masked in human **and** JSON mode. |
 | `rd config set-token <token>` | Store the Raindrop API token in `config.toml` (`0600`). |
 | `rd config set-pinboard-token <token>` | Store the Pinboard API token (`user:HEX`) in `config.toml` (`0600`). |
 
@@ -493,7 +503,8 @@ max_retries=3, dry_run=False, opener=None, sleep=time.sleep)`. The `opener` and
 ## Behavior notes
 
 - `rd open --json` resolves URLs and prints JSON only; it never launches a browser. Human mode (and `--print`) behave as before.
-- Sync preserves timestamps both ways: edits on Pinboard keep their original save time, and raindrops pushed to Pinboard carry their Raindrop `created` stamp. The unread flag round-trips too: a Pinboard post marked *to-read* becomes a `toread` tag on the raindrop, and it comes back as unread.
+- Sync preserves timestamps both ways: edits and merges on Pinboard keep the post's original save time, and raindrops pushed to Pinboard carry their Raindrop `created` stamp. The unread flag round-trips too: a Pinboard post marked *to-read* becomes a `toread` tag on the raindrop, and it comes back as unread.
+- Sync never forces visibility: a bookmark pushed to Pinboard omits the `shared` flag, so your Pinboard account's default privacy applies. A merge keeps the post's own `shared` value.
 - `rd filters` tolerates the API returning counts as bare integers or as `{"count": N}` objects.
 
 ## Development

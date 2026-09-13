@@ -47,6 +47,9 @@ raindrop-cli/
     errors.py              exception hierarchy (RaindropError base)
     config.py              token + config resolution (env -> config.toml -> .env)
     client.py              RaindropClient: the whole API over urllib  <-- core
+    pinboard.py            PinboardClient: stdlib sibling of RaindropClient
+    sync.py                two-way additive sync (pure planner + apply_plan)
+    completion.py          shell completion generated from the parser
     output.py              ANSI palette, TTY detection, table/tree/json renderers
     commands.py            one cmd_* / cfg_* handler per command
     cli.py                 argparse construction + dispatch + bootstrap
@@ -63,23 +66,47 @@ forking. Not now; post-1.0 call.
 - **`config.resolve_token()`** is the only place that decides the token. Order:
   `RAINDROP_TOKEN` env, `RAINDROP_TEST_TOKEN` env (back-compat alias),
   `token` in `$XDG_CONFIG_HOME/raindrop-cli/config.toml`, then a `.env` file
-  (`./.env`, then `$XDG_CONFIG_HOME/raindrop-cli/.env`). The `.env` reader is a tiny
+  (`./.env`, then `$XDG_CONFIG_HOME/raindrop-cli/.env`, then the pre-rename
+  `rd-cli` directory's `.env`). The `.env` reader is a tiny
   hand-rolled parser (`parse_env`) and is non-clobbering (real env wins).
+  The injected-keys registry (`config._injected`, module-level, key -> value)
+  is what keeps that order true across resolvers: `cmd_sync` resolves both
+  tokens in one process, and without the registry the second resolver would
+  take the first call's `.env` injections for real env vars (the 0.6.0 bug).
+  Matching is by exact value, so a genuinely re-exported env var still wins.
+  **Pre-rename fallback:** the package was `rd-cli` until the 2026-09 rename
+  and no migration ran, so `read_config()` falls back to
+  `$XDG_CONFIG_HOME/rd-cli/config.toml` when the current path has no config;
+  writes go to the current path and preserve every key they read (so the
+  first `rd config set-*` repatriates the legacy file), and
+  `effective_config_path()` reports the file actually in effect.
 - **`RaindropClient._request()`** is the only place that touches the network.
   It attaches auth, applies a timeout, lowercases boolean query params,
-  JSON-encodes bodies, retries `429`/`5xx`, and maps errors to typed exceptions.
-  Add endpoints as small methods that delegate to it. The constructor takes
-  `opener` and `sleep` so tests inject a fake transport (see `tests/conftest.py`).
+  JSON-encodes bodies, retries `429`/`5xx` and transient transport errors
+  (including bare `TimeoutError`: socket.timeout on 3.10+, raised by the
+  response read without a URLError wrapper), and maps errors to typed
+  exceptions. Add endpoints as small methods that delegate to it. The
+  constructor takes `opener` and `sleep` so tests inject a fake transport
+  (see `tests/conftest.py`). `PinboardClient._request` mirrors the shape with
+  explicit `write=True` flags and a rate-limit pacer.
 - **`output.configure()`** decides colour once per run; **`output.color()`** is
   a no-op when colour is off. Domain formatters (`format_raindrop_line`,
   `format_collection_tree`, ...) never print; they return strings.
-- **`commands.cmd_*(client, args)`** handlers return an exit code and choose
-  between `--json` (`output.emit_json`) and human output. `cfg_*` handlers do not
-  need a client.
+- **`commands.cmd_*(client, args)`** handlers return an exit code and route
+  output through the two `--json` chokepoints: `_out` (write-shaped: JSON
+  emits the payload, human prints a success/error line, one exit-code rule for
+  both modes) and `_rendered` (list-shaped: JSON emits the raw payload, human
+  prints rendered rows or an empty-state). Commands with genuinely bespoke
+  human output (`user`, `stats`, `filters`, `sync`, `open`, `config show`,
+  `pb get`, `exists`) keep an explicit `if args.json:` branch. `cfg_*`
+  handlers do not need a client.
 - **`cli.build_parser()`** wires everything. A shared `common` parent parser
   carries `--json`/`--no-color` onto every subcommand (with `SUPPRESS` defaults
   so a flag before the subcommand is not clobbered by the child's default;
-  `main()` normalizes the absent case back to `False`).
+  `main()` normalizes the absent case back to `False`). The back-compat
+  aliases carry no `help=` text, which is what keeps them out of `rd --help`
+  (passing `help=argparse.SUPPRESS` backfires on 3.14: argparse renders the
+  sentinel literally).
 
 ## Conventions
 
@@ -129,7 +156,9 @@ Every call needs `Authorization: Bearer <token>`. Two token kinds:
 - **Test token**: from the [App Management Console](https://app.raindrop.io/settings/integrations),
   scoped to your own account, **does not expire**. This is what raindrop-cli uses.
 - **OAuth access token**: from the 3-legged OAuth2 flow, **expires after two
-  weeks**, refreshable via `refresh_token`. Not implemented yet (roadmap).
+  weeks**, refreshable via `refresh_token`. RETIRED 2026-09-12 (Brandon): the
+  non-expiring test token makes the login/refresh machinery moot; raindrop-cli
+  will stay test-token-only.
 
 ## Conventions and gotchas
 
@@ -337,8 +366,18 @@ the dedup key), and bridges the model gap reversibly in tags (collection <-> slu
 tag, `toread`, `important`). Scope flags (`--direction`, `--collection`,
 `--rd-tag`, `--pb-tag`) narrow what is *written* while matching stays on the full
 sets, so an out-of-scope item already present on the other side is never
-re-imported. Delete propagation / conflict resolution (needs a persistent
+re-imported. Timestamps survive merges: `apply_plan` re-adds a merged Pinboard
+post with its original `time` as `dt`, and a push omits the `shared` flag so
+Pinboard's account default decides visibility (a merge keeps the post's own).
+Delete propagation / conflict resolution (needs a persistent
 manifest) is deliberately not built; see `roadmap.md` Phase 6.
+
+`rd sync --json` obeys the single-document contract: `--dry-run` emits the plan
+document (`to_pinboard`, `to_raindrop`, `merges`, dupes) and a real run emits
+the applied counts; the human plan lines are guarded on `not args.json`. The
+first resolver call inside `cmd_sync` poisons nothing for the second: the
+injected-keys registry in `config.py` keeps `.env` values from masquerading as
+real env vars across the two resolutions.
 
 Global: `--json` (any position), `--no-color`, `--version`, **`--dry-run`**
 (logs the method + payload of every write to stderr and skips the API call;
@@ -381,7 +420,10 @@ grounded in the verified batch-scope quirk above):
 - The same commands in **scope mode** (`--from <collection>`, optional `-s
   <search>`, `-n`) use the **batch endpoints** to move/delete/tag *everything in
   a source collection* in one call. `--from` is required for scope (batch does
-  not accept `0`).
+  not accept `0`). Explicit ids and `--from` together are rejected as a usage
+  error: the batch endpoints scope to the path collection and ignore an id
+  list, so `rd rm 5 --from 111` would otherwise trash all of 111 and never
+  touch id 5.
 - `rd tag` id-mode does precise add/remove/clear (it GETs current tags, computes
   the new set, PUTs). Scope-mode can only append (`--add`) or clear-all
   (`--clear`); to strip one tag everywhere use `rd tags rm <tag>`.
@@ -463,4 +505,5 @@ Bookmark fields on `posts/add`: `url`, `description` (title, max 255), `extended
 ## Not wrapped (deliberately)
 
 `posts/dates`, `user/secret`, `user/api_token`, and note *creation* (Pinboard has
-no note-write endpoint). A cross-service `rd sync` is on the roadmap, not built.
+no note-write endpoint). A cross-service `rd sync` exists; see the sync
+paragraph in the CLI command-surface section above.

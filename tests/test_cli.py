@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from rd_cli import cli
@@ -370,6 +372,35 @@ def test_tag_nothing_to_do_errors(run):
     assert code == 1
 
 
+# -- ids + --from is rejected --------------------------------------------------
+
+
+def test_rm_rejects_ids_combined_with_from(run):
+    # The batch endpoint is scoped to the --from collection and ignores the
+    # id list: `rd rm 5 --from 111` used to trash ALL of 111, not id 5.
+    code, out, stub = run(["rm", "5", "--from", "111"])
+    assert code == 1
+    assert not [
+        c for c in stub.calls if c[0] in ("delete_raindrop", "delete_raindrops")
+    ]
+
+
+def test_mv_rejects_ids_combined_with_from(run):
+    code, out, stub = run(["mv", "42", "5", "--from", "111"])
+    assert code == 1
+    assert not [
+        c for c in stub.calls if c[0] in ("update_raindrop", "update_raindrops")
+    ]
+
+
+def test_tag_rejects_ids_combined_with_from(run):
+    code, out, stub = run(["tag", "5", "--from", "111", "--add", "x"])
+    assert code == 1
+    assert not [
+        c for c in stub.calls if c[0] in ("update_raindrop", "update_raindrops")
+    ]
+
+
 def test_add_many_from_file(run, tmp_path):
     f = tmp_path / "urls.txt"
     f.write_text("https://a.com\nhttps://b.com\n\n")
@@ -385,6 +416,21 @@ def test_collections_reorder(run):
     )
     assert stub.calls[0][0] == "reorder_collections"
     assert stub.calls[0][1][0] == "-count"
+
+
+def test_false_result_exits_1_in_human_mode(run):
+    # The --json chokepoint unified the exit codes: a false result exits 1 in
+    # human output too, matching the spec's exit-code table.
+    code, out, stub = run(
+        ["collections", "reorder", "--by=title"], reorder_collections=False
+    )
+    assert code == 1
+
+
+def test_backups_create_json(run):
+    code, out, stub = run(["backups", "create", "--json"], generate_backup=b"")
+    assert code == 0
+    assert '"requested": true' in out
 
 
 def test_user_bare_shows(run):
@@ -432,3 +478,120 @@ def test_missing_token_reports_clean_error(monkeypatch, capsys):
     code = cli.main(["user"])
     assert code == 1
     assert "no token" in capsys.readouterr().err
+
+
+# -- sync ----------------------------------------------------------------------
+
+
+@pytest.fixture
+def run_sync(monkeypatch, capsys):
+    """Run ``rd sync`` with stubbed clients (cmd_sync builds its own).
+
+    Returns (exit, stdout, raindrop stub, pinboard stub)."""
+
+    def _run(argv, rd_canned=None, pb_canned=None):
+        rd = StubClient(**(rd_canned or {}))
+        pb = StubClient(**(pb_canned or {}))
+        monkeypatch.setattr(cli.config, "resolve_token", lambda: "rd-tok")
+        monkeypatch.setattr(cli.config, "resolve_pinboard_token", lambda: "pb:tok")
+        monkeypatch.setattr(cli.commands, "RaindropClient", lambda *a, **k: rd)
+        monkeypatch.setattr(cli.commands, "PinboardClient", lambda *a, **k: pb)
+        code = cli.main(argv)
+        out = capsys.readouterr()
+        return code, out.out, rd, pb
+
+    return _run
+
+
+def _one_new_raindrop():
+    return {
+        "iter_raindrops": [
+            {
+                "_id": 1,
+                "link": "https://only-rd.com",
+                "tags": [],
+                "collection": {"$id": 0},
+            }
+        ],
+        "get_collections": [],
+        "get_child_collections": [],
+    }
+
+
+def test_sync_json_dry_run_emits_single_document(run_sync):
+    code, out, rd, pb = run_sync(
+        ["sync", "--json", "--dry-run"], rd_canned=_one_new_raindrop()
+    )
+    assert code == 0
+    doc = json.loads(out)  # the plan lines would break this parse
+    assert [f["url"] for f in doc["to_pinboard"]] == ["https://only-rd.com"]
+    assert doc["to_raindrop"] == []
+    assert doc["merges"] == 0
+
+
+def test_sync_json_apply_emits_counts_only(run_sync):
+    code, out, rd, pb = run_sync(["sync", "--json"], rd_canned=_one_new_raindrop())
+    assert code == 0
+    doc = json.loads(out)
+    assert doc == {"added_pinboard": 1, "added_raindrop": 0, "merged": 0}
+    assert "pinboard (new)" not in out  # no human plan lines before the JSON
+    assert [c[0] for c in pb.calls if c[0] == "add_post"]
+
+
+def test_sync_human_dry_run_prints_plan_lines(run_sync):
+    code, out, rd, pb = run_sync(["sync", "--dry-run"], rd_canned=_one_new_raindrop())
+    assert code == 0
+    assert "raindrop -> pinboard (new): 1" in out
+    assert "dry run: 1 change(s) planned, none applied" in out
+
+
+def test_sync_human_apply_prints_summary(run_sync):
+    code, out, rd, pb = run_sync(["sync"], rd_canned=_one_new_raindrop())
+    assert code == 0
+    assert "synced: +1 to pinboard, +0 to raindrop, 0 merged" in out
+
+
+def test_sync_merge_preserves_pinboard_date(run_sync):
+    code, out, rd, pb = run_sync(
+        ["sync", "--json"],
+        rd_canned={
+            "iter_raindrops": [
+                {
+                    "_id": 1,
+                    "link": "https://both.com",
+                    "tags": ["a"],
+                    "collection": {"$id": 0},
+                    "note": "",
+                }
+            ],
+            "get_collections": [],
+            "get_child_collections": [],
+        },
+        pb_canned={
+            "get_all": [
+                {
+                    "href": "https://both.com",
+                    "description": "B",
+                    "tags": "b",
+                    "extended": "",
+                    "time": "2024-05-01T00:00:00Z",
+                    "shared": "yes",
+                    "toread": "no",
+                }
+            ]
+        },
+    )
+    assert code == 0
+    add = [c for c in pb.calls if c[0] == "add_post"][0]
+    # The merge re-adds the bookmark; without dt it would be re-dated to now.
+    assert add[2]["dt"] == "2024-05-01T00:00:00Z"
+
+
+# -- help surface ---------------------------------------------------------------
+
+
+def test_backcompat_aliases_hidden_from_help(capsys):
+    cli.main([])
+    out = capsys.readouterr().out
+    assert "c-list" not in out
+    assert "collections" in out

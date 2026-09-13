@@ -212,3 +212,63 @@ def test_apply_plan_passes_dt_to_pinboard():
     )
     sync.apply_plan(plan, FakeRD(), FakePB())
     assert calls == [{"url": "https://x.com", "dt": "2024-05-01T00:00:00Z"}]
+
+
+def test_raindrop_to_pinboard_defers_shared_to_account_default():
+    # shared=None omits the request param, so Pinboard's account-wide default
+    # privacy applies; hardcoding True made every pushed bookmark public.
+    out = sync.raindrop_to_pinboard({"link": "https://x.com"}, {})
+    assert out["shared"] is None
+
+
+def test_apply_plan_merge_keeps_pinboard_date():
+    calls = []
+
+    class FakeRD:
+        def update_raindrop(self, *a, **k):
+            calls.append("rd")
+
+    class FakePB:
+        def add_post(
+            self,
+            url,
+            title,
+            *,
+            extended="",
+            tags=None,
+            replace=False,
+            shared=None,
+            toread=None,
+            dt="",
+        ):
+            calls.append(("pb", url, tags, shared, toread, dt))
+
+    plan = sync.SyncPlan()
+    plan.merges.append(
+        {
+            "rd": {"_id": 1},
+            "pb": {
+                "href": "https://x.com",
+                "time": "2024-05-01T00:00:00Z",
+                "shared": "yes",
+                "toread": "yes",
+            },
+            "rd_tags": ["a"],
+            "pb_tags": ["b"],
+            "note": "n",
+            "rd_changed": True,
+            "pb_changed": True,
+        }
+    )
+    sync.apply_plan(plan, FakeRD(), FakePB())
+    assert calls[0] == "rd"
+    # The merge is a re-add; it must carry the original save time (dt) and
+    # the post's own visibility, not re-date or re-scope it.
+    assert calls[1] == (
+        "pb",
+        "https://x.com",
+        ["b"],
+        True,
+        True,
+        "2024-05-01T00:00:00Z",
+    )

@@ -6,12 +6,20 @@ Resolution order for the access token (first hit wins):
 2. ``RAINDROP_TEST_TOKEN`` environment variable (back-compat alias).
 3. ``token`` key in ``$XDG_CONFIG_HOME/raindrop-cli/config.toml``.
 4. ``RAINDROP_TOKEN`` / ``RAINDROP_TEST_TOKEN`` in a ``.env`` file, searched in
-   the current directory then ``$XDG_CONFIG_HOME/raindrop-cli/.env``.
+   the current directory, then ``$XDG_CONFIG_HOME/raindrop-cli/.env``, then the
+   pre-rename ``rd-cli`` directory's ``.env``.
 
 The ``.env`` reader is a deliberately tiny stdlib parser so we carry no
 ``python-dotenv`` dependency. It only loads keys that are not already in the
 environment, matching python-dotenv's default and keeping real env vars
 authoritative.
+
+The package was named ``rd-cli`` until the September 2026 rename, and the
+rename shipped without migrating anyone's config, so the old
+``$XDG_CONFIG_HOME/rd-cli/config.toml`` stays a read fallback: when the
+current path has no config yet, the legacy one is read. Writes always go to
+the current path, and because the writer preserves every key it read, the
+first ``rd config set-*`` repatriates the legacy file wholesale.
 """
 
 from __future__ import annotations
@@ -25,17 +33,48 @@ from .errors import ConfigError
 ENV_VARS = ("RAINDROP_TOKEN", "RAINDROP_TEST_TOKEN")
 PINBOARD_ENV_VARS = ("PINBOARD_TOKEN", "PINBOARD_API_TOKEN")
 
+# Keys this process has loaded from a .env file, mapped to the exact value
+# injected. Module-level on purpose: `rd sync` resolves the Raindrop and
+# Pinboard tokens in one process, and a per-call registry let the second
+# resolver mistake the first call's injections for real environment
+# variables, so a stale ./.env token beat `rd config set-pinboard-token`.
+_injected: dict[str, str] = {}
+
+
+def _config_root() -> Path:
+    base = os.environ.get("XDG_CONFIG_HOME")
+    return Path(base) if base else Path.home() / ".config"
+
 
 def config_dir() -> Path:
     """Return the raindrop-cli config directory (respects ``XDG_CONFIG_HOME``)."""
-    base = os.environ.get("XDG_CONFIG_HOME")
-    root = Path(base) if base else Path.home() / ".config"
-    return root / "raindrop-cli"
+    return _config_root() / "raindrop-cli"
 
 
 def config_path() -> Path:
     """Path to ``config.toml`` (may not exist)."""
     return config_dir() / "config.toml"
+
+
+def legacy_config_dir() -> Path:
+    """The pre-rename ``rd-cli`` config directory (read-only fallback)."""
+    return _config_root() / "rd-cli"
+
+
+def legacy_config_path() -> Path:
+    """Path to the pre-rename ``config.toml`` (may not exist)."""
+    return legacy_config_dir() / "config.toml"
+
+
+def effective_config_path() -> Path:
+    """The config file in effect: the current path when it exists, else the
+    pre-rename path when that one does (the fallback read), else the current
+    path (where ``rd config set-*`` writes)."""
+    current = config_path()
+    if current.is_file():
+        return current
+    legacy = legacy_config_path()
+    return legacy if legacy.is_file() else current
 
 
 def parse_env(text: str) -> dict[str, str]:
@@ -63,12 +102,18 @@ def parse_env(text: str) -> dict[str, str]:
 def load_env_files(paths: list[Path] | None = None) -> dict[str, str]:
     """Load the first existing ``.env`` file into ``os.environ`` (non-clobbering).
 
-    Returns the keys this file injected, so callers can tell ``.env``-sourced
-    values from real environment variables; the documented resolution order
-    (env, config.toml, .env) needs that distinction.
+    Returns the keys this call injected. They are also recorded in the
+    module-level ``_injected`` registry, so every resolver later in the same
+    process can still tell ``.env``-sourced values from real environment
+    variables; the documented resolution order (env, config.toml, .env) needs
+    that distinction.
     """
     if paths is None:
-        paths = [Path.cwd() / ".env", config_dir() / ".env"]
+        paths = [
+            Path.cwd() / ".env",
+            config_dir() / ".env",
+            legacy_config_dir() / ".env",
+        ]
     injected: dict[str, str] = {}
     for path in paths:
         if not path.is_file():
@@ -77,40 +122,44 @@ def load_env_files(paths: list[Path] | None = None) -> dict[str, str]:
             if key not in os.environ:
                 os.environ[key] = value
                 injected[key] = value
+                _injected[key] = value
         return injected
     return injected
 
 
 def read_config() -> dict:
-    """Read ``config.toml`` as a dict; empty dict if it does not exist."""
-    path = config_path()
-    if not path.is_file():
-        return {}
-    try:
-        with path.open("rb") as fh:
-            return tomllib.load(fh)
-    except (OSError, tomllib.TOMLDecodeError) as exc:
-        raise ConfigError(f"Could not read {path}: {exc}") from exc
+    """Read ``config.toml`` as a dict; empty dict if it does not exist.
+
+    Falls back to the pre-rename ``rd-cli`` directory when the current one has
+    no config yet, so installs that predate the rename keep working.
+    """
+    for path in (config_path(), legacy_config_path()):
+        if not path.is_file():
+            continue
+        try:
+            with path.open("rb") as fh:
+                return tomllib.load(fh)
+        except (OSError, tomllib.TOMLDecodeError) as exc:
+            raise ConfigError(f"Could not read {path}: {exc}") from exc
+    return {}
 
 
-def _resolve_secret(
-    injected: dict[str, str], env_vars: list[str], config_value: object
-) -> str | None:
+def _resolve_secret(env_vars: list[str], config_value: object) -> str | None:
     """Documented precedence: env var, then config.toml, then ``.env``.
 
-    Keys in ``injected`` came from a ``.env`` file, so they skip the env
-    round and only win when config has nothing; a real environment
-    variable still beats everything.
+    A variable holding the exact value a ``.env`` file injected (per the
+    module-level registry) skips the env round and only wins when config has
+    nothing; a real environment variable still beats everything.
     """
     for var in env_vars:
         token = os.environ.get(var)
-        if token and var not in injected:
+        if token and _injected.get(var) != token:
             return token
     if isinstance(config_value, str) and config_value.strip():
         return config_value
     for var in env_vars:
-        token = injected.get(var)
-        if token:
+        token = os.environ.get(var)
+        if token and _injected.get(var) == token:
             return token
     return None
 
@@ -123,8 +172,8 @@ def resolve_token() -> str:
     ``rd config set-token``, so rotating the token is never silently
     overridden by a stale ``.env``.
     """
-    injected = load_env_files()
-    token = _resolve_secret(injected, ENV_VARS, read_config().get("token"))
+    load_env_files()
+    token = _resolve_secret(ENV_VARS, read_config().get("token"))
     if token:
         return token.strip()
     raise ConfigError(
@@ -141,10 +190,8 @@ def resolve_pinboard_token() -> str:
     Same precedence as :func:`resolve_token` but for the ``PINBOARD_TOKEN`` /
     ``PINBOARD_API_TOKEN`` env vars and the ``pinboard_token`` config key.
     """
-    injected = load_env_files()
-    token = _resolve_secret(
-        injected, PINBOARD_ENV_VARS, read_config().get("pinboard_token")
-    )
+    load_env_files()
+    token = _resolve_secret(PINBOARD_ENV_VARS, read_config().get("pinboard_token"))
     if token:
         return token.strip()
     raise ConfigError(

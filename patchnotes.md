@@ -1,5 +1,77 @@
 # raindrop-cli Patch Notes
 
+Newest at the top.
+
+## v0.6.1 (2026-09-13)
+
+**The token fix that 0.6.0 never shipped, the config path the rename broke,
+and the sync contract repairs.** 0.6.0's token-precedence fix (commit
+339baa9) never reached PyPI; this release carries it, repairs a real hole it
+still had, and restores the author's own installed copy to working order.
+
+*   **Fixed: the token-precedence fix now holds in dual-token processes.**
+    `rd sync` resolves the Raindrop and Pinboard tokens in one process, and
+    `load_env_files` only reported the keys it injected on the *current*
+    call, so the second resolver took the first call's `.env` injections for
+    real environment variables. A stale `./.env` Pinboard token silently beat
+    `rd config set-pinboard-token` (the exact bug 339baa9 claimed to fix).
+    The injected-keys registry is now module-level and matches by exact
+    value, so `.env` sourcing survives across resolutions in any order while
+    a genuinely re-exported env var still wins.
+*   **Fixed: the September 2026 rename stopped reading your config.** The
+    package moved its config directory from `~/.config/rd-cli/` to
+    `~/.config/raindrop-cli/` without a migration, so every install that
+    predates the rename (including the author's) lost its token source.
+    The old path is now a read fallback when the new one has no config; the
+    first `rd config set-*` writes the new path and carries every legacy key
+    across, and `rd config path` prints the file actually in effect.
+*   **Fixed: `rd sync --json` again prints exactly one JSON document.** The
+    human plan summary lines printed before the document on a real run
+    (only `--json --dry-run` was clean). The plan lines are now guarded off
+    in JSON mode: `--dry-run` emits the plan document, a real run emits the
+    applied counts.
+*   **Fixed: sync merges keep the Pinboard post's date.** A merge re-adds the
+    post without `dt`, re-dating it to now and contradicting the documented
+    timestamp behavior. The original save time rides along, as edits and
+    pushes already did. A push also no longer hardcodes `shared: true`
+    (which made every pushed bookmark public): the flag is omitted so your
+    Pinboard account default applies, and merges keep the post's own value.
+*   **Fixed: socket timeouts join the retry core.** On Python 3.10+ a read
+    that times out raises bare `TimeoutError` instead of a `URLError`, so it
+    escaped the retry loop in both clients as a traceback. It now retries
+    with the same backoff and surfaces as a typed `APIError` when exhausted.
+*   **Fixed: explicit ids combined with `--from` are rejected.** The batch
+    endpoints scope to the path collection and ignore an id list, so
+    `rd rm 5 --from 111` trashed all of collection 111 and never touched
+    id 5. `rd rm`, `rd mv`, and `rd tag` now refuse the combination.
+*   **`rd backups create` supports `--json`** (emits `{"requested": true}`),
+    and `rd config set-token` / `set-pinboard-token` emit
+    `{"path": ...}` under `--json` instead of human text.
+*   **Exit codes unified.** A false result now exits 1 in human mode too
+    (`rd tags rename` and a few others used to exit 0 on failure), matching
+    the spec's exit-code table.
+*   **Docs re-synced with reality.** `spec.md` was still the 0.3.0 contract:
+    its non-goals banned two shipped features (confirmation prompts and the
+    permanent-copy endpoint), `open` was missing from the verb list, and
+    `--yes`/`RD_ASSUME_YES` were not in the contract. The OAuth2 "planned"
+    wording is replaced by the retirement decision in spec, README, and
+    CLAUDE.md; the README's `config show --json` "raw tokens" claim is
+    corrected (tokens are masked in both modes). CLAUDE.md's module tree now
+    lists `pinboard.py`/`sync.py`/`completion.py`.
+*   **Internals: the `--json` dispatch debt is paid.** The ~57 scattered
+    `if args.json:` branches collapsed into two chokepoints in
+    `commands.py` (`_out` for write-shaped commands, `_rendered` for
+    list-shaped ones); genuinely bespoke renders keep an explicit branch.
+    CI now tests the declared 3.11 floor alongside 3.14.
+
+Two audit findings investigated and closed without a change: the
+back-compat aliases are already absent from `rd --help` (unhelped subparsers
+are unlisted on 3.11 and 3.14, and `help=argparse.SUPPRESS` would backfire
+on 3.14 by rendering the sentinel literally); a regression test now pins
+that behavior.
+
+Suite: 170 passed, 1 skipped (was 144 passed, 1 skipped).
+
 ## v0.6.0 (2026-09-04)
 
 **Phase 7 robustness sweep: the seven verified bugs, plus safe config
@@ -46,10 +118,6 @@ Suite: 144 passed, 1 skipped (was 127).
 ## v0.5.1 (2026-08-23)
 
 - **Build:** build: add GitHub Actions CI workflow
-
-# Patch notes
-
-Newest at the top.
 
 ## 0.5.0
 

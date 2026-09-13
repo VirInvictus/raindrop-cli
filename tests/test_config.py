@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import stat
 
 import pytest
@@ -92,6 +93,50 @@ def test_resolve_pinboard_token_config_beats_dotenv(monkeypatch, tmp_path):
     assert config.resolve_pinboard_token() == "fresh:NEW"
 
 
+def test_dual_token_resolution_config_beats_dotenv_for_both(monkeypatch, tmp_path):
+    # cmd_sync resolves both tokens in ONE process. The 0.6.0 regression: the
+    # first resolver's load_env_files injected PINBOARD_TOKEN into os.environ,
+    # and the second resolver then took it for a real env var, so a stale
+    # ./.env beat `rd config set-pinboard-token`. The injected-keys registry
+    # must persist across the two calls in both orders.
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("RAINDROP_TOKEN=stale-rd\nPINBOARD_TOKEN=stale:PB\n")
+    cfg_dir = tmp_path / "raindrop-cli"
+    cfg_dir.mkdir()
+    (cfg_dir / "config.toml").write_text(
+        'token = "fresh-rd"\npinboard_token = "fresh:PB"\n'
+    )
+    assert config.resolve_token() == "fresh-rd"
+    assert config.resolve_pinboard_token() == "fresh:PB"
+    # And the other resolution order (a fresh process where sync resolves the
+    # Pinboard token first): scrub the injections and the registry together,
+    # which is exactly the state a fresh interpreter starts in. The pops are
+    # deliberately untracked (the values were injected untracked too); the
+    # autouse fixture guarantees they cannot leak past this test.
+    monkeypatch.setattr(config, "_injected", {})
+    for var in (*config.ENV_VARS, *config.PINBOARD_ENV_VARS):
+        os.environ.pop(var, None)
+    assert config.resolve_pinboard_token() == "fresh:PB"
+    assert config.resolve_token() == "fresh-rd"
+
+
+def test_dotenv_still_feeds_both_resolvers_when_config_lacks_a_key(
+    monkeypatch, tmp_path
+):
+    # The registry must only mask the env round, not the .env value itself:
+    # config without a pinboard_token still resolves it from ./.env even after
+    # the Raindrop resolver ran first in the same process.
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("PINBOARD_TOKEN=fromfile:PB\n")
+    cfg_dir = tmp_path / "raindrop-cli"
+    cfg_dir.mkdir()
+    (cfg_dir / "config.toml").write_text('token = "rd-only"\n')
+    assert config.resolve_token() == "rd-only"
+    assert config.resolve_pinboard_token() == "fromfile:PB"
+
+
 def test_env_file_does_not_clobber_real_env(monkeypatch, tmp_path):
     monkeypatch.setenv("RAINDROP_TOKEN", "real")
     monkeypatch.chdir(tmp_path)
@@ -175,3 +220,66 @@ def test_write_config_is_atomic_and_private(monkeypatch, tmp_path):
     # No temp file survives the swap, and the config is owner-only.
     assert not (path.parent / (path.name + ".tmp")).exists()
     assert (stat.S_IMODE(path.stat().st_mode) & 0o777) == 0o600
+
+
+# -- pre-rename config directory (rd-cli -> raindrop-cli, no migration) --------
+
+
+def test_legacy_config_dir_is_used_as_fallback(monkeypatch, tmp_path):
+    # Installs from before the September 2026 rename keep their tokens in
+    # rd-cli/; the rename shipped without a migration, so the old path stays
+    # readable or the installed tool has no token source at all.
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+    legacy = tmp_path / "rd-cli"
+    legacy.mkdir()
+    (legacy / "config.toml").write_text(
+        'token = "legacy-rd"\npinboard_token = "legacy:PB"\n'
+    )
+    assert config.resolve_token() == "legacy-rd"
+    assert config.resolve_pinboard_token() == "legacy:PB"
+    assert config.effective_config_path() == legacy / "config.toml"
+
+
+def test_current_config_beats_legacy(monkeypatch, tmp_path):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "rd-cli").mkdir()
+    (tmp_path / "rd-cli" / "config.toml").write_text('token = "legacy-rd"\n')
+    cfg_dir = tmp_path / "raindrop-cli"
+    cfg_dir.mkdir()
+    (cfg_dir / "config.toml").write_text('token = "current-rd"\n')
+    assert config.resolve_token() == "current-rd"
+    assert config.effective_config_path() == cfg_dir / "config.toml"
+
+
+def test_legacy_dotenv_is_last_candidate(monkeypatch, tmp_path):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+    legacy = tmp_path / "rd-cli"
+    legacy.mkdir()
+    (legacy / ".env").write_text("RAINDROP_TOKEN=legacy-env\n")
+    assert config.resolve_token() == "legacy-env"
+
+
+def test_write_repatriates_legacy_keys(monkeypatch, tmp_path):
+    # The writer preserves every key it read, so the first set-* on a
+    # legacy-only install copies the whole file to the current path.
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+    legacy = tmp_path / "rd-cli"
+    legacy.mkdir()
+    (legacy / "config.toml").write_text('token = "legacy-rd"\n')
+    path = config.write_pinboard_token("new:PB")
+    assert path == tmp_path / "raindrop-cli" / "config.toml"
+    data = config.read_config()
+    assert data["token"] == "legacy-rd"
+    assert data["pinboard_token"] == "new:PB"
+    assert config.resolve_token() == "legacy-rd"
+
+
+def test_no_config_anywhere_reports_current_path(monkeypatch, tmp_path):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+    assert config.read_config() == {}
+    assert config.effective_config_path() == tmp_path / "raindrop-cli" / "config.toml"

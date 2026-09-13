@@ -90,7 +90,9 @@ def raindrop_to_pinboard(rd: dict, coll_title_by_id: dict[int, str]) -> dict:
         "extended": note,
         "tags": tags,
         "toread": "toread" in tags,
-        "shared": True,
+        # None omits the request param, so Pinboard's account-wide default
+        # privacy applies; hardcoding True made every pushed bookmark public.
+        "shared": None,
         "dt": rd.get("created") or "",
     }
 
@@ -262,6 +264,10 @@ def apply_plan(plan: SyncPlan, rd_client: Any, pb_client: Any) -> dict[str, int]
                 replace=True,
                 shared=pb.get("shared") != "no",
                 toread=pb.get("toread") == "yes",
+                # A merge is a re-add; without dt Pinboard would re-date the
+                # bookmark to now. Carry the original save time like
+                # edit_post does.
+                dt=str(pb.get("time") or ""),
             )
         counts["merged"] += 1
     return counts

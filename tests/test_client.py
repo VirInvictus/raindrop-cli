@@ -190,6 +190,22 @@ def test_retry_after_header_respected():
     assert calls == [2.0]
 
 
+def test_retries_on_bare_timeout_error():
+    # socket.timeout IS TimeoutError on 3.10+, and the response read raises it
+    # bare rather than wrapped in a URLError; it must retry like any other
+    # transient transport failure, not escape as a traceback.
+    c, _, calls = make_client([TimeoutError(), {"item": {"_id": 7}}])
+    assert c.get_raindrop(7) == {"_id": 7}
+    assert len(calls) == 1
+
+
+def test_timeout_errors_exhaust_retries_then_raise_api_error():
+    c, _, calls = make_client([TimeoutError()] * 5, max_retries=3)
+    with pytest.raises(APIError):
+        c.get_raindrop(1)
+    assert len(calls) == 3
+
+
 # -- pagination ---------------------------------------------------------------
 
 

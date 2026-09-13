@@ -5,10 +5,13 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import urllib.error
 from email.message import Message
 
 import pytest
+
+from rd_cli import config
 
 
 class FakeResponse:
@@ -62,6 +65,28 @@ class FakeOpener:
     @property
     def last(self):
         return self.requests[-1]
+
+
+@pytest.fixture(autouse=True)
+def _isolate_token_state(monkeypatch):
+    """Fresh token-resolution state per test.
+
+    ``load_env_files`` injects into ``os.environ`` directly, which
+    ``monkeypatch`` cannot see or undo, and the injected-keys registry is
+    module state. Without this fixture one test's ``.env`` could leak its
+    injections (or a developer's real ``~/.config/rd-cli`` fallback) into the
+    next test.
+    """
+    token_vars = (*config.ENV_VARS, *config.PINBOARD_ENV_VARS)
+    before = {var: os.environ.get(var) for var in token_vars}
+    monkeypatch.setattr(config, "_injected", {})
+    yield
+    for var in token_vars:
+        if os.environ.get(var) != before[var]:
+            if before[var] is None:
+                os.environ.pop(var, None)
+            else:
+                os.environ[var] = before[var]
 
 
 @pytest.fixture

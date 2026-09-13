@@ -45,6 +45,14 @@ def test_get_post_returns_none_when_absent():
     assert c.get_post("https://nope") is None
 
 
+def test_retries_on_bare_timeout_error():
+    # socket.timeout IS TimeoutError on 3.10+, raised bare by the response
+    # read; the retry core must catch it like a URLError.
+    c, _, calls = make_client([TimeoutError(), {"posts": []}])
+    assert c.get_recent() == []
+    assert len(calls) == 1
+
+
 def test_add_post_maps_flags_and_joins_tags():
     c, opener, _ = make_client([{"result_code": "done"}])
     c.add_post(

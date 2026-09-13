@@ -106,7 +106,7 @@ names and their meaning:
 - `list` / `search` — read raindrops (`--all` paginates; `-c/--collection`,
   `-s/--search`, `--sort`, `--page`, `--perpage`, `-n/--nested`, `-d/--detailed`).
 - `view <id>` — one raindrop in detail.
-- `open <ids...>` — open a raindrop's URL in the browser; `--cache` (alias
+- `open <ids...>`: open a raindrop's URL in the browser; `--cache` (alias
   `--permanent`) opens the permanent copy instead (PRO), `--print` emits the
   URL and launches nothing. `--json` resolves and prints without launching.
 - `add <url>` — create (auto-parses metadata unless `--no-parse`; default

@@ -53,6 +53,32 @@ def test_retries_on_bare_timeout_error():
     assert len(calls) == 1
 
 
+def test_retries_on_connection_reset():
+    # ConnectionResetError is an OSError, not a URLError; the shared transport
+    # family must catch it, not let it escape as a traceback.
+    c, _, calls = make_client([ConnectionResetError(), {"posts": []}])
+    assert c.get_recent() == []
+    assert len(calls) == 1
+
+
+def test_write_is_never_retried_on_transport_errors():
+    # Pinboard's mutators are GETs, so the write flag decides: after a timeout
+    # the server-side outcome is unknown and a re-send could double-apply.
+    c, opener, calls = make_client([TimeoutError(), {"result_code": "done"}])
+    with pytest.raises(APIError):
+        c.add_post("https://x", "T")
+    assert len(opener.requests) == 1  # one attempt, no retry
+    assert calls == []
+
+
+def test_429_honors_retry_after_header():
+    # Shared retry-wait logic: Raindrop honored Retry-After; Pinboard now
+    # does too instead of always using the fixed backoff curve.
+    c, _, calls = make_client([http_error(429, headers={"Retry-After": "2"}), {}])
+    c.get_tags()
+    assert calls == [2.0]
+
+
 def test_add_post_maps_flags_and_joins_tags():
     c, opener, _ = make_client([{"result_code": "done"}])
     c.add_post(

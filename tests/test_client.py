@@ -6,6 +6,7 @@ import pytest
 
 from conftest import FakeOpener, http_error
 from rd_cli import client as client_mod
+from rd_cli._transport import encode_params
 from rd_cli.client import RaindropClient
 from rd_cli.errors import APIError, AuthError, NotFoundError, RateLimitError
 
@@ -199,6 +200,36 @@ def test_retries_on_bare_timeout_error():
     assert len(calls) == 1
 
 
+def test_retries_on_connection_reset():
+    # ConnectionResetError is an OSError, not a URLError; before the retry
+    # family broadened it escaped both the retry loop and main()'s handler.
+    c, _, calls = make_client([ConnectionResetError(), {"item": {"_id": 7}}])
+    assert c.get_raindrop(7) == {"_id": 7}
+    assert len(calls) == 1
+
+
+def test_retries_on_incomplete_read():
+    # http.client.IncompleteRead (a dropped body) is an HTTPException, the
+    # other half of the transient family.
+    import http.client
+
+    c, _, calls = make_client(
+        [http.client.IncompleteRead(b"partial"), {"item": {"_id": 7}}]
+    )
+    assert c.get_raindrop(7) == {"_id": 7}
+    assert len(calls) == 1
+
+
+def test_post_is_never_retried_on_transport_errors():
+    # A timed-out POST may already have created the raindrop server-side;
+    # re-sending would double-create silently. Writes fail loudly instead.
+    c, opener, calls = make_client([TimeoutError(), {"item": {"_id": 7}}])
+    with pytest.raises(APIError):
+        c.create_raindrop("https://x.com")
+    assert len(opener.requests) == 1  # one attempt, no retry
+    assert calls == []
+
+
 def test_timeout_errors_exhaust_retries_then_raise_api_error():
     c, _, calls = make_client([TimeoutError()] * 5, max_retries=3)
     with pytest.raises(APIError):
@@ -228,7 +259,7 @@ def test_iter_raindrops_single_short_page():
 
 
 def test_encode_params_lowercases_bool_and_drops_none():
-    assert client_mod._encode_params({"a": True, "b": None, "c": 3}) == "a=true&c=3"
+    assert encode_params({"a": True, "b": None, "c": 3}) == "a=true&c=3"
 
 
 def test_multipart_contains_boundary_and_parts():

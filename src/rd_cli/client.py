@@ -4,9 +4,11 @@ REST API v1 (https://api.raindrop.io/rest/v1).
 Everything goes through :meth:`RaindropClient._request`, which is the single
 place that attaches the auth header, applies a timeout, JSON-encodes bodies,
 lowercases boolean query params (the API rejects Python's ``True``/``False``),
-retries on ``429``/``5xx``, and maps error responses to the typed exceptions in
-:mod:`rd_cli.errors`. The per-endpoint methods below are deliberately small so
-this class can later graduate into a standalone client library.
+and maps error responses to the typed exceptions in :mod:`rd_cli.errors`.
+Sending, retries, and the transient-error family live in
+:mod:`rd_cli._transport`, shared verbatim with the Pinboard client. The
+per-endpoint methods below are deliberately small so this class can later
+graduate into a standalone client library.
 
 The constructor accepts an ``opener`` and ``sleep`` so tests can inject a fake
 transport and avoid real network / real waiting.
@@ -14,20 +16,18 @@ transport and avoid real network / real waiting.
 
 from __future__ import annotations
 
-import calendar
-import email.utils
 import json
 import os
 import sys
 import time
-import urllib.error
 import urllib.parse
 import urllib.request
 from collections.abc import Iterator
 from typing import Any
 
 from . import __version__
-from .errors import APIError, AuthError, NotFoundError, RateLimitError
+from ._transport import _Handled, encode_params, retry_wait, send_with_retries
+from .errors import NotFoundError
 
 BASE_URL = "https://api.raindrop.io/rest/v1"
 USER_AGENT = (
@@ -91,7 +91,7 @@ class RaindropClient:
         allow_redirects: bool = True,
     ) -> Any:
         url = self.base_url + path
-        query = _encode_params(params)
+        query = encode_params(params)
         if query:
             url = f"{url}?{query}"
 
@@ -119,56 +119,25 @@ class RaindropClient:
 
         opener = self._opener if allow_redirects else self._noredirect_opener
 
-        attempt = 0
-        while True:
-            try:
-                with opener.open(req, timeout=self.timeout) as resp:
-                    body = resp.read()
-                if not expect_json:
-                    return body
-                return json.loads(body) if body else {}
-            except urllib.error.HTTPError as exc:
-                # With redirects suppressed a 3xx is the answer, not an error:
-                # the caller wants the target URL, so hand back Location.
-                if not allow_redirects and exc.code in (301, 302, 303, 307, 308):
-                    return exc.headers.get("Location")
-                retry_after = self._retry_wait(exc, attempt)
-                if retry_after is not None and attempt < self.max_retries:
-                    self._sleep(retry_after)
-                    attempt += 1
-                    continue
-                raise _to_api_error(exc) from exc
-            except (urllib.error.URLError, TimeoutError) as exc:
-                # TimeoutError: socket.timeout on 3.10+, raised bare by the
-                # response read rather than wrapped in a URLError. Either way
-                # it is a transient transport failure: retry, then give up
-                # with the typed error.
-                reason = exc.reason if isinstance(exc, urllib.error.URLError) else exc
-                if attempt < self.max_retries:
-                    self._sleep(_backoff(attempt))
-                    attempt += 1
-                    continue
-                raise APIError(f"Network error: {reason}") from exc
-
-    def _retry_wait(self, exc: urllib.error.HTTPError, attempt: int) -> float | None:
-        """Return seconds to wait before retrying, or ``None`` if not retryable."""
-        if exc.code == 429:
-            header = exc.headers.get("Retry-After")
-            if header:
-                if header.strip().isdigit():
-                    return min(float(header), 60.0)
-                # Retry-After may also be an HTTP-date.
-                parsed = email.utils.parsedate(header)
-                if parsed:
-                    wait = calendar.timegm(parsed) - time.time()
-                    return max(0.0, min(wait, 60.0))
-            reset = exc.headers.get("X-RateLimit-Reset")
-            if reset and reset.isdigit():
-                return max(0.0, min(float(reset) - time.time(), 60.0))
-            return _backoff(attempt)
-        if 500 <= exc.code < 600:
-            return _backoff(attempt)
-        return None
+        # A POST is never retried on a transport failure: after a timeout the
+        # server may have already created the raindrop, and re-sending would
+        # double-create silently. GET/PUT/DELETE re-send to the same effect.
+        body = send_with_retries(
+            opener,
+            req,
+            timeout=self.timeout,
+            max_retries=self.max_retries,
+            sleep=self._sleep,
+            http_wait=retry_wait,
+            transport_retry=method != "POST",
+            resolve_redirect=None if allow_redirects else _redirect_location,
+        )
+        if isinstance(body, str):
+            # A suppressed redirect: the Location header is the answer.
+            return body
+        if not expect_json:
+            return body
+        return json.loads(body) if body else {}
 
     # -- raindrops: single ----------------------------------------------------
 
@@ -647,18 +616,13 @@ def _collection_payload(**fields: Any) -> dict:
 # -- request helpers ----------------------------------------------------------
 
 
-def _encode_params(params: dict[str, Any] | None) -> str:
-    if not params:
-        return ""
-    clean: dict[str, str] = {}
-    for key, value in params.items():
-        if value is None:
-            continue
-        if isinstance(value, bool):
-            clean[key] = "true" if value else "false"
-        else:
-            clean[key] = str(value)
-    return urllib.parse.urlencode(clean)
+def _redirect_location(exc) -> _Handled | None:
+    """With redirects suppressed a 3xx is the answer, not an error: the caller
+    wants the target URL, so hand back its ``Location`` header (``None`` when
+    the response carries none)."""
+    if exc.code in (301, 302, 303, 307, 308):
+        return _Handled(exc.headers.get("Location"))
+    return None
 
 
 def _multipart(
@@ -706,29 +670,3 @@ def _dry_run_preview(
             else (f"<multipart files=[{parts}]>")
         )
     return "<no body>"
-
-
-def _backoff(attempt: int) -> float:
-    """Exponential backoff: 0.5s, 1s, 2s, ... capped at 30s."""
-    return min(0.5 * (2**attempt), 30.0)
-
-
-def _to_api_error(exc: urllib.error.HTTPError) -> APIError:
-    message = exc.reason or "request failed"
-    payload: dict | None = None
-    try:
-        raw = exc.read()
-        if raw:
-            decoded = json.loads(raw)
-            if isinstance(decoded, dict):
-                payload = decoded
-                message = decoded.get("errorMessage") or decoded.get("error") or message
-    except (ValueError, OSError):
-        pass
-    if exc.code in (401, 403):
-        return AuthError(message, status=exc.code, payload=payload)
-    if exc.code == 404:
-        return NotFoundError(message, status=exc.code, payload=payload)
-    if exc.code == 429:
-        return RateLimitError(message, status=exc.code, payload=payload)
-    return APIError(message, status=exc.code, payload=payload)

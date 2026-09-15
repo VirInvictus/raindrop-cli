@@ -10,9 +10,10 @@ the shared typed-error family), but adapted to Pinboard's realities:
   with ``write=True`` rather than inferred from the HTTP method (that is what
   ``--dry-run`` keys off).
 - **JSON is opt-in** via ``format=json`` on every call.
-- **The rate limit is strict** (one call per ~3s, ``posts/all`` once per 5 min),
-  so the client paces itself with a minimum inter-request interval on top of the
-  usual ``429`` backoff.
+- **The rate limit is strict** (one call per ~3s, ``posts/all`` once per 5
+  min). The client enforces the 3s minimum interval itself; the 5-minute
+  windows are the server's to answer, with a ``429`` that the shared retry
+  core backs off from.
 
 Pinboard's data model is flat: bookmarks keyed by URL (there are no numeric ids
 and no collections), tags, and notes. There is no full-text search endpoint;
@@ -24,12 +25,11 @@ from __future__ import annotations
 import json
 import sys
 import time
-import urllib.error
 import urllib.request
 from typing import Any
 
 from . import __version__
-from .client import _backoff, _encode_params, _to_api_error
+from ._transport import encode_params, retry_wait, send_with_retries
 from .errors import APIError
 
 BASE_URL = "https://api.pinboard.in/v1"
@@ -84,38 +84,25 @@ class PinboardClient:
             print(f"DRY RUN GET {path} {json.dumps(shown)}", file=sys.stderr)
             return {"result_code": "done", "result": "done"}
 
-        url = f"{self.base_url}{path}?{_encode_params(query)}"
+        url = f"{self.base_url}{path}?{encode_params(query)}"
         headers = {"User-Agent": USER_AGENT, "Accept": "application/json"}
         req = urllib.request.Request(url, headers=headers, method="GET")
 
-        attempt = 0
-        while True:
-            self._pace()
-            try:
-                with self._opener.open(req, timeout=self.timeout) as resp:
-                    body = resp.read()
-                self._last_call = self._clock()
-                return json.loads(body) if body else {}
-            except urllib.error.HTTPError as exc:
-                self._last_call = self._clock()
-                if (
-                    exc.code == 429 or 500 <= exc.code < 600
-                ) and attempt < self.max_retries:
-                    self._sleep(_backoff(attempt))
-                    attempt += 1
-                    continue
-                raise _to_api_error(exc) from exc
-            except (urllib.error.URLError, TimeoutError) as exc:
-                # TimeoutError: socket.timeout on 3.10+, raised bare by the
-                # response read rather than wrapped in a URLError. Either way
-                # it is a transient transport failure: retry, then give up
-                # with the typed error.
-                reason = exc.reason if isinstance(exc, urllib.error.URLError) else exc
-                if attempt < self.max_retries:
-                    self._sleep(_backoff(attempt))
-                    attempt += 1
-                    continue
-                raise APIError(f"Network error: {reason}") from exc
+        # A write is never retried on a transport failure: the mutators are
+        # GETs, but after a timeout the server-side outcome is unknown, and
+        # re-sending could double-apply. Reads retry like any other client.
+        body = send_with_retries(
+            self._opener,
+            req,
+            timeout=self.timeout,
+            max_retries=self.max_retries,
+            sleep=self._sleep,
+            http_wait=retry_wait,
+            transport_retry=not write,
+            before_attempt=self._pace,
+            stamp=lambda: setattr(self, "_last_call", self._clock()),
+        )
+        return json.loads(body) if body else {}
 
     def _pace(self) -> None:
         """Sleep so consecutive calls are at least ``min_interval`` apart."""
@@ -136,7 +123,7 @@ class PinboardClient:
     # -- posts ----------------------------------------------------------------
 
     def last_update(self) -> str:
-        """Timestamp of the most recent bookmark change (cheap, for sync)."""
+        """Timestamp of the most recent bookmark change (the cheapest call)."""
         return self._request("/posts/update").get("update_time", "")
 
     def get_all(

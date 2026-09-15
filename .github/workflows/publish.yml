@@ -15,7 +15,8 @@ jobs:
           python-version: "3.11"
 
       - name: Install test dependencies
-        run: pip install . pytest
+        # Exact pin: the publish path must not float on a bad pytest release.
+        run: pip install . pytest==9.1.1
 
       - name: Run test suite
         run: PYTHONPATH=src pytest
@@ -29,6 +30,7 @@ jobs:
       url: https://pypi.org/p/raindrop-cli
     permissions:
       id-token: write
+      contents: write # the release step cuts the GitHub Release from the tag
 
     steps:
       - uses: actions/checkout@v4
@@ -44,3 +46,11 @@ jobs:
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+
+      - name: Create the GitHub Release from the tag
+        # The annotated tag message is the verbatim patchnotes entry, so
+        # --notes-from-tag reproduces it by construction and future tags
+        # cannot end up bare of a Release.
+        run: gh release create "$GITHUB_REF_NAME" --verify-tag --notes-from-tag
+        env:
+          GH_TOKEN: ${{ github.token }}

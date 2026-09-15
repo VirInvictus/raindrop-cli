@@ -18,7 +18,9 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - run: pip install .
-      - run: pip install ruff pytest
+      # Exact pins: floating test/lint tools on the CI path let a bad pytest
+      # release red tag day silently. Bump deliberately, together with uv.lock.
+      - run: pip install ruff==0.15.22 pytest==9.1.1
       - run: ruff check .
       - run: ruff format --check .
       - run: PYTHONPATH=src python -m pytest tests

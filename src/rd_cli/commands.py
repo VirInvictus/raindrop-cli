@@ -30,15 +30,27 @@ def _assume_yes(args: Any) -> bool:
     return os.environ.get("RD_ASSUME_YES", "").strip().lower() in ("1", "true", "yes")
 
 
-def _confirmed(args: Any, question: str) -> bool:
+def _confirmed(args: Any, question: str) -> str | None:
     """Gate a destructive operation behind a confirmation.
 
-    ``--dry-run`` passes straight through: it performs no writes, and its whole
-    point is to show what would happen without an interrogation first.
+    Returns ``None`` when the operation may proceed, otherwise the refusal
+    reason, ready to hand to :func:`_fail`. ``--dry-run`` passes straight
+    through: it performs no writes, and its whole point is to show what would
+    happen without an interrogation first. In ``--json`` mode the refusal is
+    the run's single stdout document, so it is captured here instead of
+    printed to stderr.
     """
     if getattr(args, "dry_run", False):
-        return True
-    return output.confirm(question, assume_yes=_assume_yes(args))
+        return None
+    if args.json:
+        refused: list[str] = []
+        ok = output.confirm(question, assume_yes=_assume_yes(args), emit=refused.append)
+        if ok:
+            return None
+        return refused[0] if refused else "aborted"
+    if not output.confirm(question, assume_yes=_assume_yes(args)):
+        return "aborted"
+    return None
 
 
 def _scope_count(client: RaindropClient, collection: int, search: str, nested: bool):
@@ -66,11 +78,26 @@ def _scope_phrase(count, noun: str = "raindrop") -> str:
 
 # -- --json dispatch chokepoints -----------------------------------------------
 #
-# Every command decides its output mode in exactly one of these two helpers, so
-# the single-document JSON contract has two enforcement points instead of sixty
-# scattered branches. Commands whose human output is genuinely bespoke (user,
-# stats, filters, sync, config show, open) keep an explicit branch instead of
-# bending their render through a helper.
+# Every command decides its output mode in exactly one of these helpers, so the
+# single-document JSON contract has a handful of enforcement points instead of
+# sixty scattered branches. The genuinely bespoke human renders (user, stats,
+# filters, sync, open, config show, pb get, pb suggest, pb notes view, exists)
+# keep an explicit ``if args.json:`` branch instead of bending through a
+# helper; the StubClient tests pin both output modes per command.
+
+
+def _fail(args: Any, message: str) -> int:
+    """Emit a handled error in the active mode and return 1.
+
+    ``--json`` mode gets ``{"error": ...}`` on stdout — a script parsing the
+    run must never see an empty stdout on a handled failure, which is exactly
+    what the old human-only ``output.error`` paths produced. Humans get the
+    stderr line as before."""
+    if args.json:
+        output.emit_json({"error": message})
+    else:
+        output.error(message)
+    return 1
 
 
 def _out(args: Any, payload: Any, human: str, *, ok: bool = True, err: str = "") -> int:
@@ -92,10 +119,12 @@ def _rendered(
 ) -> int:
     """Read/list-shaped commands: JSON mode emits the raw API payload; human
     mode prints the rendered rows, or the empty-state message when there is
-    nothing (exiting ``empty_code``)."""
+    nothing (exiting ``empty_code``). A missing object exits ``empty_code`` in
+    both modes, so ``rd view --json`` on a dead id exits 1 like the human
+    mode (and like ``pb get``) instead of drifting to 0."""
     if args.json:
         output.emit_json(items)
-        return 0
+        return 0 if items else empty_code
     if not items and empty is not None:
         output.error(empty)
         return empty_code
@@ -198,8 +227,7 @@ def cmd_add(client: RaindropClient, args: Any) -> int:
     if urls is not None:
         return _add_many(client, args, urls)
     if not args.url:
-        output.error("provide a URL, or --file/--stdin to add many")
-        return 1
+        return _fail(args, "provide a URL, or --file/--stdin to add many")
     item = client.create_raindrop(
         args.url,
         title=args.title,
@@ -254,30 +282,36 @@ def cmd_edit(client: RaindropClient, args: Any) -> int:
 
 def cmd_rm(client: RaindropClient, args: Any) -> int:
     if not args.ids and args.from_collection is None:
-        output.error("provide raindrop id(s), or --from <collection> for scope mode")
-        return 1
+        return _fail(
+            args, "provide raindrop id(s), or --from <collection> for scope mode"
+        )
     # Scope mode: delete everything in a source collection (optionally filtered
     # by search) in one batch call. The batch endpoint's path is a scope, so a
     # real source collection is required (0 is unsupported for remove-many).
     if getattr(args, "from_collection", None) is not None:
         if args.ids:
-            output.error(
+            return _fail(
+                args,
                 "--from is scope mode and ignores explicit ids; pass ids or "
-                "--from, not both"
+                "--from, not both",
             )
-            return 1
+        if args.from_collection == 0:
+            # The batch endpoints reject 0 server-side (and a silent no-op is
+            # worse than a loud error): catch it before the call.
+            return _fail(
+                args,
+                "the batch endpoints do not support collection 0; "
+                "pass a real collection id (or -1/-99)",
+            )
         count = _scope_count(
             client, args.from_collection, args.search or "", args.nested
         )
         where = f"collection {args.from_collection}"
         if args.search:
             where += f" matching {args.search!r}"
-        if not _confirmed(
-            args,
-            f"Remove {_scope_phrase(count)} in {where}?",
-        ):
-            output.error("aborted")
-            return 1
+        refused = _confirmed(args, f"Remove {_scope_phrase(count)} in {where}?")
+        if refused:
+            return _fail(args, refused)
         n = client.delete_raindrops(
             args.from_collection, search=args.search or "", nested=args.nested
         )
@@ -290,63 +324,83 @@ def cmd_rm(client: RaindropClient, args: Any) -> int:
     # Id mode: loop the single-item endpoint (always correct regardless of which
     # collection each raindrop lives in). Only the permanent path asks: a plain
     # remove lands in Trash and is undoable, so a prompt there is just noise.
-    if args.permanent and not _confirmed(
-        args,
-        f"Permanently delete {len(args.ids)} raindrop(s)? This cannot be undone.",
-    ):
-        output.error("aborted")
-        return 1
+    if args.permanent:
+        refused = _confirmed(
+            args,
+            f"Permanently delete {len(args.ids)} raindrop(s)? This cannot be undone.",
+        )
+        if refused:
+            return _fail(args, refused)
     results = {
         rid: client.delete_raindrop(rid, permanent=args.permanent) for rid in args.ids
     }
     ok = sum(1 for v in results.values() if v)
     verb = "permanently deleted" if args.permanent else "moved to trash"
+    # The payload is the spec's boolean-result shape; the human line carries
+    # the per-run counts.
     return _out(
         args,
-        results,
+        {"result": ok == len(results)},
         f"{verb} {ok}/{len(results)} raindrop(s)",
         ok=ok == len(results),
     )
 
 
 def cmd_export(client: RaindropClient, args: Any) -> int:
+    if args.json and not args.output:
+        # The export payload is raw CSV/HTML/ZIP bytes; they cannot ride in the
+        # single JSON document. Refuse instead of silently ignoring --json,
+        # and point at -o (mirroring `backups download`'s metadata document).
+        return _fail(
+            args,
+            "export writes raw bytes; in --json mode pass -o to name a file",
+        )
     data = client.export(
         args.collection, fmt=args.format, sort=args.sort, search=args.search
     )
     if args.output:
         with open(args.output, "wb") as fh:
             fh.write(data)
-        output.success(f"wrote {len(data)} bytes to {args.output}")
-    else:
-        sys.stdout.buffer.write(data)
+        return _out(
+            args,
+            {"path": args.output, "bytes": len(data), "format": args.format},
+            f"wrote {len(data)} bytes to {args.output}",
+        )
+    sys.stdout.buffer.write(data)
     return 0
 
 
 def cmd_mv(client: RaindropClient, args: Any) -> int:
     dest = args.collection
     if not args.ids and args.from_collection is None:
-        output.error("provide raindrop id(s), or --from <collection> for scope mode")
-        return 1
+        return _fail(
+            args, "provide raindrop id(s), or --from <collection> for scope mode"
+        )
     # Scope mode: move everything in a source collection (optional search) at once.
     if getattr(args, "from_collection", None) is not None:
         if args.ids:
-            output.error(
+            return _fail(
+                args,
                 "--from is scope mode and ignores explicit ids; pass ids or "
-                "--from, not both"
+                "--from, not both",
             )
-            return 1
+        if args.from_collection == 0:
+            return _fail(
+                args,
+                "the batch endpoints do not support collection 0; "
+                "pass a real collection id (or -1/-99)",
+            )
         count = _scope_count(
             client, args.from_collection, args.search or "", args.nested
         )
         where = f"collection {args.from_collection}"
         if args.search:
             where += f" matching {args.search!r}"
-        if not _confirmed(
-            args,
-            f"Move {_scope_phrase(count)} from {where} into collection {dest}?",
-        ):
-            output.error("aborted")
-            return 1
+        refused = _confirmed(
+            args, f"Move {_scope_phrase(count)} from {where} into collection {dest}?"
+        )
+        if refused:
+            return _fail(args, refused)
         n = client.update_raindrops(
             args.from_collection,
             search=args.search or "",
@@ -373,23 +427,28 @@ def cmd_tag(client: RaindropClient, args: Any) -> int:
     add = args.add or []
     remove = set(args.remove or [])
     if not (add or remove or args.clear):
-        output.error("nothing to do: pass --add, --remove, or --clear")
-        return 1
+        return _fail(args, "nothing to do: pass --add, --remove, or --clear")
 
     # Scope mode: append tags (or clear all) across a whole collection/search.
     if getattr(args, "from_collection", None) is not None:
         if args.ids:
-            output.error(
+            return _fail(
+                args,
                 "--from is scope mode and ignores explicit ids; pass ids or "
-                "--from, not both"
+                "--from, not both",
             )
-            return 1
+        if args.from_collection == 0:
+            return _fail(
+                args,
+                "the batch endpoints do not support collection 0; "
+                "pass a real collection id (or -1/-99)",
+            )
         if remove:
-            output.error(
+            return _fail(
+                args,
                 "--remove is not supported in scope mode; use ids, or "
-                "`tags rm <tag>` to strip a tag from every raindrop"
+                "`tags rm <tag>` to strip a tag from every raindrop",
             )
-            return 1
         new_tags: list[str] = [] if args.clear else add
         count = _scope_count(
             client, args.from_collection, args.search or "", args.nested
@@ -399,12 +458,12 @@ def cmd_tag(client: RaindropClient, args: Any) -> int:
             where += f" matching {args.search!r}"
         # Appending tags is additive and cheap to undo; --clear destroys every
         # tag in scope, so only that branch asks.
-        if args.clear and not _confirmed(
-            args,
-            f"Clear all tags from {_scope_phrase(count)} in {where}?",
-        ):
-            output.error("aborted")
-            return 1
+        if args.clear:
+            refused = _confirmed(
+                args, f"Clear all tags from {_scope_phrase(count)} in {where}?"
+            )
+            if refused:
+                return _fail(args, refused)
         n = client.update_raindrops(
             args.from_collection,
             search=args.search or "",
@@ -414,6 +473,15 @@ def cmd_tag(client: RaindropClient, args: Any) -> int:
         return _out(args, {"modified": n}, f"updated tags on {n} raindrop(s)")
 
     # Id mode: compute the new tag set per raindrop (add/remove/clear precisely).
+    # --clear destroys every tag on the item with no undo, so it asks just like
+    # scope mode does (there is no record of the prior tags to restore from).
+    if args.clear:
+        refused = _confirmed(
+            args,
+            f"Clear all tags from {len(args.ids)} raindrop(s)? This cannot be undone.",
+        )
+        if refused:
+            return _fail(args, refused)
     changed = 0
     for rid in args.ids:
         current = [] if args.clear else list(client.get_raindrop(rid).get("tags") or [])
@@ -483,12 +551,12 @@ def cmd_collections_edit(client: RaindropClient, args: Any) -> int:
 def cmd_collections_rm(client: RaindropClient, args: Any) -> int:
     # Deleting a collection takes its raindrops with it (they go to Trash), so
     # the blast radius is everything inside, not the one id typed.
-    if not _confirmed(
+    refused = _confirmed(
         args,
         f"Delete collection {args.id} and move its raindrops to Trash?",
-    ):
-        output.error("aborted")
-        return 1
+    )
+    if refused:
+        return _fail(args, refused)
     ok = client.delete_collection(args.id)
     return _out(
         args,
@@ -516,12 +584,12 @@ def cmd_collections_clean(client: RaindropClient, args: Any) -> int:
 
 
 def cmd_collections_empty_trash(client: RaindropClient, args: Any) -> int:
-    if not _confirmed(
+    refused = _confirmed(
         args,
         "Permanently delete everything in Trash? This cannot be undone.",
-    ):
-        output.error("aborted")
-        return 1
+    )
+    if refused:
+        return _fail(args, refused)
     ok = client.empty_trash()
     return _out(
         args, {"result": ok}, "emptied trash", ok=ok, err="failed to empty trash"
@@ -603,9 +671,9 @@ def cmd_tags_rm(client: RaindropClient, args: Any) -> int:
         else " everywhere"
     )
     listed = ", ".join("#" + t for t in args.tags)
-    if not _confirmed(args, f"Delete {listed}{scope}? This cannot be undone."):
-        output.error("aborted")
-        return 1
+    refused = _confirmed(args, f"Delete {listed}{scope}? This cannot be undone.")
+    if refused:
+        return _fail(args, refused)
     ok = client.delete_tags(args.tags, args.collection)
     return _out(
         args,
@@ -683,8 +751,7 @@ def cmd_user_set(client: RaindropClient, args: Any) -> int:
     for pair in args.config or []:
         key, sep, value = pair.partition("=")
         if not sep:
-            output.error(f"bad --config entry (want key=value): {pair}")
-            return 1
+            return _fail(args, f"bad --config entry (want key=value): {pair}")
         config_updates[key.strip()] = value.strip()
     user = client.update_user(
         fullName=args.name,
@@ -910,12 +977,10 @@ def cmd_pb_tag(client: PinboardClient, args: Any) -> int:
     add = args.add or []
     remove = set(args.remove or [])
     if not (add or remove or args.clear):
-        output.error("nothing to do: pass --add, --remove, or --clear")
-        return 1
+        return _fail(args, "nothing to do: pass --add, --remove, or --clear")
     post = client.get_post(args.url)
     if post is None:
-        output.error(f"not saved: {args.url}")
-        return 1
+        return _fail(args, f"not saved: {args.url}")
     current = [] if args.clear else (post.get("tags") or "").split()
     merged = [t for t in current if t not in remove]
     for t in add:
@@ -1080,10 +1145,16 @@ def cmd_completion(client: Any, args: Any) -> int:
     """Print the completion script for a shell.
 
     Imported lazily and built from the live parser, so the output can never drift
-    from the commands this build actually has.
+    from the commands this build actually has. (Lazy because ``commands`` is
+    imported by ``cli`` first: an eager import would close the
+    cli -> commands -> cli cycle with a partial module.)
     """
     from . import cli, completion
 
+    if args.json:
+        # A completion script is shell code by definition; there is no JSON
+        # document to emit, so refuse instead of silently ignoring --json.
+        return _fail(args, "completion emits a shell script; --json is not supported")
     print(completion.generate(args.shell, cli.build_parser()), end="")
     return 0
 
@@ -1091,7 +1162,11 @@ def cmd_completion(client: Any, args: Any) -> int:
 def cfg_path(client: Any, args: Any) -> int:
     # The effective path: a pre-rename install still reading ~/.config/rd-cli
     # sees where its tokens actually live, not where the next write would go.
-    print(config.effective_config_path())
+    path = str(config.effective_config_path())
+    if args.json:
+        output.emit_json({"path": path})
+        return 0
+    print(path)
     return 0
 
 

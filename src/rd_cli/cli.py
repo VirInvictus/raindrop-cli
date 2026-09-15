@@ -11,6 +11,7 @@ not touch the network).
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 
 from . import __version__, commands, completion, config, output
@@ -741,7 +742,20 @@ def main(argv: list[str] | None = None) -> int:
         elif getattr(args, "needs_client", False):
             client = RaindropClient(config.resolve_token(), dry_run=args.dry_run)
         return args.func(client, args)
+    except BrokenPipeError:
+        # Before the OSError catch: a closed `| head` is a clean exit, not an
+        # error to report (into a pipe that is already gone).
+        return 0
     except RaindropError as exc:
+        if getattr(args, "json", False):
+            output.emit_json({"error": str(exc)})
+        else:
+            output.error(str(exc))
+        return 1
+    except (OSError, json.JSONDecodeError) as exc:
+        # Command-boundary catch: a missing input file, an unwritable -o path,
+        # or a non-JSON 200 body must surface as a clean handled error, not a
+        # raw traceback.
         if getattr(args, "json", False):
             output.emit_json({"error": str(exc)})
         else:
@@ -749,8 +763,6 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     except KeyboardInterrupt:
         return 130
-    except BrokenPipeError:
-        return 0
 
 
 if __name__ == "__main__":

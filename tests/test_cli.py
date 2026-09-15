@@ -595,3 +595,83 @@ def test_backcompat_aliases_hidden_from_help(capsys):
     out = capsys.readouterr().out
     assert "c-list" not in out
     assert "collections" in out
+
+
+# -- the --json contract (single document on stdout, every mode) ----------------
+
+
+def test_json_missing_object_exits_1(run):
+    # empty_code is honored in JSON mode too: `rd view --json` on a dead id
+    # exits 1 like human mode (and like `pb get`) instead of drifting to 0.
+    code, out, stub = run(["view", "--json", "999"], get_raindrop={})
+    assert code == 1
+    assert json.loads(out) == {}
+
+
+def test_json_pre_flight_error_emits_document(run):
+    # Guards used to print human text to stderr and leave stdout empty in
+    # JSON mode; agents parsing the run need the error as the document.
+    code, out, stub = run(["rm", "--json"])
+    assert code == 1
+    assert "error" in json.loads(out)
+
+
+def test_json_confirm_refusal_emits_document(run):
+    # Non-interactive stdin refuses; the refusal is the run's single document.
+    code, out, stub = run(
+        ["rm", "--from", "5", "--json"],
+        get_raindrops={"count": 4, "items": []},
+    )
+    assert code == 1
+    doc = json.loads(out)
+    assert "non-interactive stdin" in doc["error"]
+    assert not [c for c in stub.calls if c[0] == "delete_raindrops"]
+
+
+def test_export_json_requires_output(run):
+    code, out, stub = run(["export", "--json"], export=b"a,b\n1,2\n")
+    assert code == 1
+    assert "--json" in json.loads(out)["error"]
+
+
+def test_export_json_with_output_emits_metadata(run, tmp_path):
+    target = tmp_path / "out.csv"
+    code, out, stub = run(["export", "--json", "-o", str(target)], export=b"a,b\n1,2\n")
+    assert code == 0
+    doc = json.loads(out)
+    assert doc["path"] == str(target)
+    assert doc["bytes"] == 8
+    assert doc["format"] == "csv"
+    assert target.read_bytes() == b"a,b\n1,2\n"
+
+
+def test_completion_json_refuses(capsys):
+    code = cli.main(["completion", "--json", "bash"])
+    assert code == 1
+    doc = json.loads(capsys.readouterr().out)
+    assert "shell script" in doc["error"]
+
+
+def test_config_path_json_emits_document(monkeypatch, capsys):
+    code = cli.main(["config", "path", "--json"])
+    assert code == 0
+    assert "path" in json.loads(capsys.readouterr().out)
+
+
+def test_tag_clear_id_mode_confirms(run):
+    # --clear destroys every tag with no undo; id mode now asks just like
+    # scope mode (a non-interactive stdin refuses, -y pre-answers).
+    code, out, stub = run(["tag", "1", "--clear"], get_raindrop={"tags": ["a"]})
+    assert code == 1
+    assert not [c for c in stub.calls if c[0] == "update_raindrop"]
+
+    code, out, stub = run(["tag", "1", "--clear", "-y"], get_raindrop={"tags": ["a"]})
+    assert code == 0
+    assert [c for c in stub.calls if c[0] == "update_raindrop"]
+
+
+def test_rm_json_payload_is_boolean_result_shape(run):
+    # The spec's boolean-result shape, not the old per-id map.
+    code, out, stub = run(["rm", "--json", "1", "2"], delete_raindrop=True)
+    assert code == 0
+    assert json.loads(out) == {"result": True}

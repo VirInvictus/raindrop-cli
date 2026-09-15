@@ -255,6 +255,26 @@ def test_iter_raindrops_single_short_page():
     assert len(opener.requests) == 1
 
 
+def test_iter_raindrops_clamps_perpage_before_comparing():
+    # perpage=500 fetches as 50 (the API ceiling); the loop must compare
+    # against the clamped size or a full 50-item page reads as "short" and
+    # truncates the walk after page 1.
+    full = {"items": [{"_id": i} for i in range(50)]}
+    short = {"items": [{"_id": 50}]}
+    c, opener, _ = make_client([full, short])
+    out = list(c.iter_raindrops(0, perpage=500))
+    assert len(out) == 51
+    assert "perpage=50" in opener.requests[0].full_url
+    assert len(opener.requests) == 2
+
+
+def test_iter_highlights_clamps_perpage_before_comparing():
+    full = {"items": [{"_id": i} for i in range(50)]}
+    short = {"items": [{"_id": 50}]}
+    c, _, _ = make_client([full, short])
+    assert len(list(c.iter_highlights(perpage=100))) == 51
+
+
 # -- helpers ------------------------------------------------------------------
 
 

@@ -114,6 +114,7 @@ def cmd_list(client: RaindropClient, args: Any) -> int:
                 search=args.search,
                 sort=args.sort,
                 nested=args.nested,
+                perpage=args.perpage,
             )
         )
     else:
@@ -622,7 +623,7 @@ def cmd_highlights_list(client: RaindropClient, args: Any) -> int:
     if args.raindrop:
         items = client.get_raindrop_highlights(args.raindrop)
     elif getattr(args, "all", False):
-        items = list(client.iter_highlights())
+        items = list(client.iter_highlights(perpage=args.perpage))
     else:
         items = client.get_all_highlights(page=args.page, perpage=args.perpage)
     return _rendered(

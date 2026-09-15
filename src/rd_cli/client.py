@@ -238,7 +238,11 @@ class RaindropClient:
         nested: bool = False,
         perpage: int = PERPAGE_MAX,
     ) -> Iterator[dict]:
-        """Yield every raindrop across all pages."""
+        """Yield every raindrop across all pages (``perpage`` is clamped to the
+        API's 50 ceiling, so any value walks every page)."""
+        # The fetch clamps to PERPAGE_MAX; comparing the unclamped value would
+        # mistake a full 50-item page for a short one and stop after page 1.
+        page_size = min(perpage, PERPAGE_MAX)
         page = 0
         while True:
             data = self.get_raindrops(
@@ -246,12 +250,12 @@ class RaindropClient:
                 search=search,
                 sort=sort,
                 page=page,
-                perpage=perpage,
+                perpage=page_size,
                 nested=nested,
             )
             items = data.get("items", [])
             yield from items
-            if len(items) < perpage:
+            if len(items) < page_size:
                 return
             page += 1
 
@@ -455,11 +459,14 @@ class RaindropClient:
         )
 
     def iter_highlights(self, *, perpage: int = PERPAGE_MAX) -> Iterator[dict]:
+        """Yield every highlight across all pages (``perpage`` is clamped to
+        the API's 50 ceiling, so any value walks every page)."""
+        page_size = min(perpage, PERPAGE_MAX)
         page = 0
         while True:
-            items = self.get_all_highlights(page=page, perpage=perpage)
+            items = self.get_all_highlights(page=page, perpage=page_size)
             yield from items
-            if len(items) < perpage:
+            if len(items) < page_size:
                 return
             page += 1
 

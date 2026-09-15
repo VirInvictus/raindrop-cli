@@ -255,13 +255,27 @@ def _collect_urls(args: Any) -> list[str] | None:
 
 
 def _add_many(client: RaindropClient, args: Any, urls: list[str]) -> int:
+    # A single value cannot sensibly stamp a list of URLs (one title for every
+    # bookmark?), so batch mode rejects the per-item flags loudly instead of
+    # silently ignoring them. --no-parse is honored: it is naturally a
+    # batch-wide knob.
+    for flag in ("title", "tags", "excerpt", "note", "important"):
+        if getattr(args, flag, None):
+            return _fail(
+                args,
+                f"--{flag} applies to a single add; it is rejected in "
+                "--file/--stdin batch mode",
+            )
+
+    def batch_item(url: str) -> dict:
+        item = {"link": url, "collection": {"$id": args.collection}}
+        if not args.no_parse:
+            item["pleaseParse"] = {}
+        return item
+
     created: list[dict] = []
     for chunk in _chunks(urls, 100):  # API caps a batch at 100 items
-        items = [
-            {"link": url, "collection": {"$id": args.collection}, "pleaseParse": {}}
-            for url in chunk
-        ]
-        created.extend(client.create_raindrops(items))
+        created.extend(client.create_raindrops([batch_item(url) for url in chunk]))
     return _out(args, created, f"added {len(created)} raindrop(s)")
 
 

@@ -408,6 +408,38 @@ def test_add_many_from_file(run, tmp_path):
     assert stub.calls[0][0] == "create_raindrops"
     items = stub.calls[0][1][0]
     assert [i["link"] for i in items] == ["https://a.com", "https://b.com"]
+    assert all(i["pleaseParse"] == {} for i in items)  # batch parses by default
+
+
+def test_add_many_honors_no_parse(run, tmp_path):
+    # --no-parse was silently ignored in batch mode (items always carried
+    # pleaseParse, the opposite of the flag's name); it is a batch-wide knob.
+    f = tmp_path / "urls.txt"
+    f.write_text("https://a.com\n")
+    code, out, stub = run(
+        ["add", "--file", str(f), "--no-parse"], create_raindrops=[{"_id": 1}]
+    )
+    assert code == 0
+    assert "pleaseParse" not in stub.calls[0][1][0][0]
+
+
+def test_add_many_rejects_single_add_value_flags(run, tmp_path):
+    # One title (or tag set, excerpt, note, important flag) cannot sensibly
+    # stamp a list of URLs: reject loudly instead of silently ignoring.
+    f = tmp_path / "urls.txt"
+    f.write_text("https://a.com\n")
+    for flag_args in (
+        ["--title", "X"],
+        ["--tags", "x"],
+        ["--excerpt", "e"],
+        ["--note", "n"],
+        ["--important"],
+    ):
+        code, out, stub = run(
+            ["add", "--file", str(f), *flag_args], create_raindrops=[{"_id": 1}]
+        )
+        assert code == 1, flag_args
+        assert not [c for c in stub.calls if c[0] == "create_raindrops"]
 
 
 def test_collections_reorder(run):

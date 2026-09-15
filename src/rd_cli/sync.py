@@ -48,20 +48,31 @@ TRACKING = {
 
 def normalize_url(url: str) -> str:
     """A comparison key: unify scheme to https, drop ``www.`` and the fragment,
-    strip tracking params (but keep meaningful ones), and sort the rest."""
-    p = urlsplit(url.strip())
-    host = (p.hostname or "").lower()
-    if host.startswith("www."):
-        host = host[4:]
-    if p.port:
-        host = f"{host}:{p.port}"
-    path = p.path.rstrip("/") or "/"
-    kept = sorted(
-        (k, v)
-        for k, v in parse_qsl(p.query, keep_blank_values=True)
-        if k.lower() not in TRACKING
-    )
-    return urlunsplit(("https", host, path, urlencode(kept), ""))
+    strip tracking params (but keep meaningful ones), and sort the rest.
+
+    A URL too malformed to parse (``urlsplit`` rejects bad IPv6 brackets, and
+    ``.port`` raises on ``:abc`` or an out-of-range port) falls back to the raw
+    URL as the key. It still dedups against itself, which is all a match key
+    needs; one junk bookmark must not crash the whole sync with a traceback.
+    """
+    raw = url.strip()
+    try:
+        p = urlsplit(raw)
+        host = (p.hostname or "").lower()
+        if host.startswith("www."):
+            host = host[4:]
+        port = p.port  # raises ValueError on a malformed/out-of-range port
+        if port:
+            host = f"{host}:{port}"
+        path = p.path.rstrip("/") or "/"
+        kept = sorted(
+            (k, v)
+            for k, v in parse_qsl(p.query, keep_blank_values=True)
+            if k.lower() not in TRACKING
+        )
+        return urlunsplit(("https", host, path, urlencode(kept), ""))
+    except ValueError:
+        return raw
 
 
 def _slug(title: str) -> str:

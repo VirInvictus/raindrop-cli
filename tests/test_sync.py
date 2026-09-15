@@ -16,6 +16,34 @@ def test_normalize_url_keeps_meaningful_query():
     assert u1 != u2
 
 
+def test_normalize_url_survives_malformed_port():
+    # urlsplit(url).port raises ValueError on a non-numeric or out-of-range
+    # port; one junk bookmark used to crash the whole sync with a traceback.
+    junk = "https://example.com:99999/page"
+    assert sync.normalize_url(junk) == junk
+    junk2 = "https://example.com:abc/page"
+    assert sync.normalize_url(junk2) == junk2
+
+
+def test_plan_sync_survives_junk_bookmark():
+    # The crash guard's real job: a junk link plans like any other item
+    # instead of taking down `rd sync`.
+    raindrops = [
+        {"_id": 1, "link": "https://good.com", "tags": [], "collection": {"$id": 0}},
+        {
+            "_id": 2,
+            "link": "https://junk.com:99999/p",
+            "tags": [],
+            "collection": {"$id": 0},
+        },
+    ]
+    plan = sync.plan_sync(raindrops, [], {}, {})
+    assert sorted(f["url"] for f in plan.to_pinboard) == [
+        "https://good.com",
+        "https://junk.com:99999/p",
+    ]
+
+
 def test_raindrop_to_pinboard_encodes_collection_and_important():
     rd = {
         "link": "https://x.com",

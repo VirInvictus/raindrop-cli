@@ -226,10 +226,55 @@ def format_highlight_line(hl: dict) -> str:
     hid = color(f"[{hl.get('_id')}]", "id")
     ref_str = color(f"rd:{ref}", "muted") if ref else ""
     lines = [f"{hid} {ref_str} {marker} {hl.get('text', '')}".rstrip()]
+    # The /highlights endpoints carry the source's title and link on the
+    # highlight itself; a bare raindropRef (an id) is all a raindrop-embedded
+    # highlight offers, and then there is simply no title to show.
+    title = (hl.get("title") or "").strip()
+    if title:
+        lines.append("      " + color(f"from: {title}", "muted"))
     note = (hl.get("note") or "").strip()
     if note:
         lines.append("      " + color("note: " + note, "muted"))
     return "\n".join(lines)
+
+
+def format_highlights_markdown(items: list[dict]) -> str:
+    """All highlights as markdown, grouped by source raindrop in first-seen
+    order. Sources come from the highlight payload's own ``title``/``link``
+    (the /highlights endpoints carry them), so no per-raindrop fetches."""
+    order: list[str] = []
+    groups: dict[str, list[dict]] = {}
+    for hl in items:
+        ref = hl.get("raindropRef")
+        key = f"rd:{ref}" if ref else "(no source)"
+        if key not in groups:
+            groups[key] = []
+            order.append(key)
+        groups[key].append(hl)
+
+    lines: list[str] = ["# Raindrop highlights", ""]
+    for key in order:
+        first = groups[key][0]
+        title = (first.get("title") or "").strip() or "(untitled)"
+        lines.append(f"## {title}")
+        lines.append("")
+        parts = []
+        if first.get("link"):
+            parts.append(first["link"])
+        if key != "(no source)":
+            parts.append(f"rd:{key[3:]}")
+        if parts:
+            lines.append(" · ".join(parts))
+            lines.append("")
+        for hl in groups[key]:
+            text = (hl.get("text") or "").strip().replace("\n", "\n> ")
+            lines.append(f"> {text}")
+            note = (hl.get("note") or "").strip()
+            if note:
+                lines.append("")
+                lines.append(f"  *{note}*")
+            lines.append("")
+    return "\n".join(lines).rstrip() + "\n"
 
 
 # -- pinboard formatters ------------------------------------------------------

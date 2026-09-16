@@ -707,3 +707,185 @@ def test_rm_json_payload_is_boolean_result_shape(run):
     code, out, stub = run(["rm", "--json", "1", "2"], delete_raindrop=True)
     assert code == 0
     assert json.loads(out) == {"result": True}
+
+
+# -- config check ---------------------------------------------------------------
+
+
+def test_config_check_reports_tiers_never_values(monkeypatch, capsys, tmp_path):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    monkeypatch.setenv("RAINDROP_TOKEN", "sekrit-rd-token")
+    monkeypatch.setenv("PINBOARD_TOKEN", "user:sekrit-pb")
+    code = cli.main(["config", "check", "--json"])
+    out = capsys.readouterr().out
+    assert code == 0
+    doc = json.loads(out)
+    assert doc["raindrop_token"] == {"tier": "environment", "var": "RAINDROP_TOKEN"}
+    assert doc["pinboard_token"] == {"tier": "environment", "var": "PINBOARD_TOKEN"}
+    assert "sekrit" not in out  # the report names tiers, never values
+
+
+def test_config_check_config_tier(monkeypatch, capsys, tmp_path):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    cli.main(["config", "set-token", "sekrit-config-token"])
+    capsys.readouterr()
+    code = cli.main(["config", "check", "--json"])
+    doc = json.loads(capsys.readouterr().out)
+    assert code == 0
+    assert doc["raindrop_token"]["tier"] == "config.toml"
+    assert doc["config_path"] == str(tmp_path / "raindrop-cli" / "config.toml")
+
+
+def test_config_check_ping(monkeypatch, capsys, tmp_path):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    monkeypatch.setenv("RAINDROP_TOKEN", "sekrit")
+    monkeypatch.setenv("PINBOARD_TOKEN", "user:sekrit")
+
+    class OkClient:
+        def __init__(self, token, **kwargs):
+            pass
+
+        def get_user(self):
+            return {}
+
+        def last_update(self):
+            return ""
+
+    monkeypatch.setattr(cli.commands, "RaindropClient", OkClient)
+    monkeypatch.setattr(cli.commands, "PinboardClient", OkClient)
+    code = cli.main(["config", "check", "--ping", "--json"])
+    doc = json.loads(capsys.readouterr().out)
+    assert code == 0
+    assert doc["ping"] == {"raindrop": True, "pinboard": True}
+
+
+# -- highlights: collection filter + export -------------------------------------
+
+
+def test_highlights_list_by_collection(run):
+    code, out, stub = run(
+        ["highlights", "list", "-c", "5"], get_collection_highlights=[]
+    )
+    assert stub.calls[0][0] == "get_collection_highlights"
+    assert stub.calls[0][1][0] == 5
+
+
+def test_highlights_list_rejects_raindrop_and_collection(run):
+    with pytest.raises(SystemExit) as ei:
+        run(["highlights", "list", "-r", "1", "-c", "5"])
+    assert ei.value.code == 2  # argparse mutually exclusive group
+
+
+def test_highlights_export_markdown(run, capsys):
+    highlights = [
+        {
+            "_id": "h1",
+            "text": "Orion is the new browser",
+            "note": "",
+            "color": "red",
+            "raindropRef": 123,
+            "title": "Orion Browser",
+            "link": "https://apple.com",
+        },
+        {
+            "_id": "h2",
+            "text": "Second quote",
+            "note": "a note",
+            "color": "blue",
+            "raindropRef": 123,
+            "title": "Orion Browser",
+            "link": "https://apple.com",
+        },
+    ]
+    code, out, stub = run(["highlights", "export"], iter_highlights=highlights)
+    assert code == 0
+    md = out
+    assert md.startswith("# Raindrop highlights")
+    assert "## Orion Browser" in md
+    assert "rd:123" in md
+    assert "> Orion is the new browser" in md
+    assert "*a note*" in md
+    # grouped: one heading for both highlights
+    assert md.count("## ") == 1
+
+
+def test_highlights_export_json_and_file(run, tmp_path, capsys):
+    target = tmp_path / "hl.md"
+    code, out, stub = run(
+        ["highlights", "export", "--json", "-o", str(target)],
+        iter_highlights=[{"_id": "h1", "text": "t", "raindropRef": 7}],
+    )
+    assert code == 0
+    doc = json.loads(out)
+    assert doc["count"] == 1
+    assert doc["sources"][0]["raindrop_ref"] == 7
+    assert not target.exists()  # --json never writes files
+
+
+# -- pinboard date filters -------------------------------------------------------
+
+
+@pytest.fixture
+def run_pb(monkeypatch, capsys):
+    """Run a Pinboard command with a stubbed PinboardClient."""
+
+    def _run(argv, **canned):
+        stub = StubClient(**canned)
+        monkeypatch.setattr(cli.config, "resolve_pinboard_token", lambda: "pb:tok")
+        monkeypatch.setattr(cli, "PinboardClient", lambda *a, **k: stub)
+        code = cli.main(argv)
+        out = capsys.readouterr()
+        return code, out.out, stub
+
+    return _run
+
+
+def test_pb_list_dates_require_all(run_pb):
+    code, out, stub = run_pb(["pb", "list", "--from", "2026-01-01T00:00:00Z"])
+    assert code == 1
+    assert not [c for c in stub.calls if c[0] == "get_recent"]
+
+
+def test_pb_list_dates_pass_through(run_pb):
+    code, out, stub = run_pb(
+        [
+            "pb",
+            "list",
+            "--all",
+            "--from",
+            "2026-01-01T00:00:00Z",
+            "--to",
+            "2026-02-01T00:00:00Z",
+        ],
+        get_all=[],
+    )
+    assert code == 0
+    kwargs = stub.calls[0][2]
+    assert kwargs["fromdt"] == "2026-01-01T00:00:00Z"
+    assert kwargs["todt"] == "2026-02-01T00:00:00Z"
+
+
+# -- dupes -----------------------------------------------------------------------
+
+
+def test_dupes_reports_both_services(monkeypatch, capsys):
+    rd = StubClient(
+        iter_raindrops=[
+            {"_id": 1, "link": "https://x.com/p", "title": "First"},
+            {"_id": 2, "link": "https://x.com/p/", "title": "Second"},
+            {"_id": 3, "link": "https://unique.com", "title": "Only"},
+        ]
+    )
+    pb = StubClient(get_all=[{"href": "https://a.com", "description": "A"}])
+    monkeypatch.setattr(cli.config, "resolve_token", lambda: "rd-tok")
+    monkeypatch.setattr(cli.config, "resolve_pinboard_token", lambda: "pb:tok")
+    monkeypatch.setattr(cli.commands, "RaindropClient", lambda *a, **k: rd)
+    monkeypatch.setattr(cli.commands, "PinboardClient", lambda *a, **k: pb)
+    code = cli.main(["dupes", "--json"])
+    out = capsys.readouterr().out
+    assert code == 0
+    doc = json.loads(out)
+    assert len(doc["raindrop"]) == 1
+    assert doc["raindrop"][0]["url"] == "https://x.com/p"
+    assert [i["_id"] for i in doc["raindrop"][0]["items"]] == [1, 2]
+    assert doc["pinboard"] == []

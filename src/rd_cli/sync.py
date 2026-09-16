@@ -79,6 +79,21 @@ def _slug(title: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", title.strip().lower()).strip("-")
 
 
+def find_duplicates(
+    records: list[dict], key_field: str
+) -> list[tuple[str, list[dict]]]:
+    """Groups of records sharing one normalized-URL key, where the group has
+    more than one record, in first-seen order. The same key (and the same
+    malformed-URL fallback) that :func:`plan_sync` matches and dedups by."""
+    groups: dict[str, list[dict]] = {}
+    for record in records:
+        link = record.get(key_field)
+        if not link:
+            continue
+        groups.setdefault(normalize_url(link), []).append(record)
+    return [(key, group) for key, group in groups.items() if len(group) > 1]
+
+
 def raindrop_to_pinboard(rd: dict, coll_title_by_id: dict[int, str]) -> dict:
     """Fields for creating this raindrop on Pinboard. The "toread" tag (the
     pinboard_to_raindrop convention) restores Pinboard's unread state, and the

@@ -702,8 +702,12 @@ def cmd_tags_rm(client: RaindropClient, args: Any) -> int:
 
 
 def cmd_highlights_list(client: RaindropClient, args: Any) -> int:
-    if args.raindrop:
+    if getattr(args, "raindrop", None) is not None:
         items = client.get_raindrop_highlights(args.raindrop)
+    elif getattr(args, "collection", None) is not None:
+        items = client.get_collection_highlights(
+            args.collection, page=args.page, perpage=args.perpage
+        )
     elif getattr(args, "all", False):
         items = list(client.iter_highlights(perpage=args.perpage))
     else:
@@ -714,6 +718,55 @@ def cmd_highlights_list(client: RaindropClient, args: Any) -> int:
         lambda: "\n".join(output.format_highlight_line(hl) for hl in items),
         empty="no highlights found",
     )
+
+
+def cmd_highlights_export(client: RaindropClient, args: Any) -> int:
+    """All highlights as markdown, grouped by source. The markdown IS the
+    human product; --json emits the grouped structure instead of pretending a
+    markdown string is a document."""
+    items = list(client.iter_highlights(perpage=50))
+
+    if args.json:
+        order: list[Any] = []
+        groups: dict[Any, list[dict]] = {}
+        for hl in items:
+            ref = hl.get("raindropRef")
+            if ref not in groups:
+                groups[ref] = []
+                order.append(ref)
+            groups[ref].append(hl)
+        output.emit_json(
+            {
+                "count": len(items),
+                "sources": [
+                    {
+                        "raindrop_ref": ref,
+                        "title": (groups[ref][0].get("title") or "").strip() or None,
+                        "link": groups[ref][0].get("link"),
+                        "highlights": [
+                            {
+                                "id": hl.get("_id"),
+                                "text": hl.get("text"),
+                                "note": hl.get("note") or None,
+                                "color": hl.get("color"),
+                            }
+                            for hl in groups[ref]
+                        ],
+                    }
+                    for ref in order
+                ],
+            }
+        )
+        return 0
+
+    markdown = output.format_highlights_markdown(items)
+    if args.output:
+        with open(args.output, "w", encoding="utf-8") as fh:
+            fh.write(markdown)
+        print(f"wrote {len(items)} highlight(s) to {args.output}")
+    else:
+        print(markdown, end="")
+    return 0
 
 
 def cmd_highlights_add(client: RaindropClient, args: Any) -> int:
@@ -927,8 +980,16 @@ def cmd_backups_download(client: RaindropClient, args: Any) -> int:
 def cmd_pb_list(client: PinboardClient, args: Any) -> int:
     tags = args.tag or None
     if getattr(args, "all", False):
-        items = client.get_all(tags=tags)
+        items = client.get_all(
+            tags=tags, fromdt=args.from_dt or "", todt=args.to_dt or ""
+        )
     else:
+        if getattr(args, "from_dt", "") or getattr(args, "to_dt", ""):
+            # posts/recent has no date parameters; failing loudly beats
+            # silently ignoring the filter.
+            return _fail(
+                args, "date filters need --all (posts/recent has no date parameters)"
+            )
         items = client.get_recent(tags=tags, count=args.count)
     if args.toread:
         items = [p for p in items if p.get("toread") == "yes"]
@@ -1155,6 +1216,55 @@ def cmd_sync(client: Any, args: Any) -> int:
 # -- config -------------------------------------------------------------------
 
 
+def cmd_dupes(client: Any, args: Any) -> int:
+    """Read-only report of URLs saved more than once within each service.
+
+    The sync planner already collapses these (keeping the first); this shows
+    what would collapse, with titles and ids, so they can be merged by hand.
+    It writes nothing."""
+    rd = RaindropClient(config.resolve_token())
+    pb = PinboardClient(config.resolve_pinboard_token())
+    raindrops = list(rd.iter_raindrops(0))
+    posts = pb.get_all()
+    report = {
+        "raindrop": [
+            {
+                "url": key,
+                "items": [
+                    {"_id": r.get("_id"), "title": r.get("title") or ""} for r in group
+                ],
+            }
+            for key, group in sync.find_duplicates(raindrops, "link")
+        ],
+        "pinboard": [
+            {
+                "url": key,
+                "items": [{"description": p.get("description") or ""} for p in group],
+            }
+            for key, group in sync.find_duplicates(posts, "href")
+        ],
+    }
+    if args.json:
+        output.emit_json(report)
+        return 0
+
+    m = output.color
+    for service in ("raindrop", "pinboard"):
+        groups = report[service]
+        if not groups:
+            print(f"{m(service + ':', 'muted')} no duplicates")
+            continue
+        print(f"{m(service + ':', 'muted')} {len(groups)} duplicate group(s)")
+        for group in groups:
+            print(f"  {group['url']}")
+            for item in group["items"]:
+                if "_id" in item:
+                    print(f"    [{item['_id']}] {item['title']}")
+                else:
+                    print(f"    - {item['description']}")
+    return 0
+
+
 def cmd_completion(client: Any, args: Any) -> int:
     """Print the completion script for a shell.
 
@@ -1204,6 +1314,84 @@ def cfg_show(client: Any, args: Any) -> int:
 def cfg_set_token(client: Any, args: Any) -> int:
     path = config.write_token(args.token)
     return _out(args, {"path": str(path)}, f"token saved to {path}")
+
+
+def cfg_check(client: Any, args: Any) -> int:
+    """Report which config file is in effect and which tier each token
+    resolves from (environment, config.toml, or .env), never the value.
+
+    Three of this repo's worst shipped bugs were silently-wrong token
+    resolution; this turns that class into a one-command diagnosis. With
+    ``--ping`` it also calls each service's cheapest read endpoint to prove
+    the tokens actually work (the only network this command touches).
+    """
+    env_path = config.env_file_in_effect()
+    injected = config.load_env_files()
+    try:
+        config.read_config()
+        config_error = None
+    except config.ConfigError as exc:
+        config_error = str(exc)
+
+    report: dict[str, Any] = {
+        "config_path": str(config.effective_config_path()),
+        "config_error": config_error,
+        "env_file": str(env_path) if env_path else None,
+        "env_keys": sorted(injected),
+        "raindrop_token": config.locate_token("raindrop")[1],
+        "pinboard_token": config.locate_token("pinboard")[1],
+    }
+
+    if args.ping:
+        rd_token = config.locate_token("raindrop")[0]
+        pb_token = config.locate_token("pinboard")[0]
+        report["ping"] = {
+            "raindrop": _ping(RaindropClient, rd_token, lambda c: c.get_user()),
+            "pinboard": _ping(PinboardClient, pb_token, lambda c: c.last_update()),
+        }
+
+    if args.json:
+        output.emit_json(report)
+        return 0
+
+    print(f"{output.color('config file:', 'muted')} {report['config_path']}")
+    if config_error:
+        print(f"  {output.color('unreadable:', 'error')} {config_error}")
+    if env_path:
+        keys = ", ".join(report["env_keys"]) if report["env_keys"] else "no token keys"
+        print(f"{output.color('.env:', 'muted')} {env_path} ({keys})")
+    else:
+        print(f"{output.color('.env:', 'muted')} none found")
+    for label, key in (
+        ("raindrop token", "raindrop_token"),
+        ("pinboard token", "pinboard_token"),
+    ):
+        tier = report[key]
+        if tier["tier"] is None:
+            state = output.color("NOT SET", "error")
+            print(f"{output.color(label + ':', 'muted')} {state}")
+        elif tier["tier"] == "environment":
+            print(f"{output.color(label + ':', 'muted')} environment ({tier['var']})")
+        else:
+            print(f"{output.color(label + ':', 'muted')} {tier['tier']}")
+    if args.ping:
+        for label, result in report["ping"].items():
+            state = "ok" if result is True else f"FAILED ({result})"
+            tone = "ok" if result is True else "error"
+            prefix = output.color("ping " + label + ":", "muted")
+            print(f"{prefix} {output.color(state, tone)}")
+    return 0
+
+
+def _ping(client_cls, token: str | None, probe) -> Any:
+    """Call the service's cheapest read; True on success, else the reason."""
+    if not token:
+        return "no token"
+    try:
+        probe(client_cls(token))
+        return True
+    except Exception as exc:  # a failed ping IS the diagnosis; report it
+        return str(exc)
 
 
 # -- helpers ------------------------------------------------------------------

@@ -420,10 +420,23 @@ def _add_highlight_commands(sub, common):
     hsub = h.add_subparsers(dest="subcommand", metavar="<action>", required=True)
 
     p = _p(hsub, "list", common, commands.cmd_highlights_list, help="list highlights")
-    p.add_argument("-r", "--raindrop", type=int, help="highlights of one raindrop")
+    group = p.add_mutually_exclusive_group()
+    group.add_argument("-r", "--raindrop", type=int, help="highlights of one raindrop")
+    group.add_argument(
+        "-c", "--collection", type=int, help="highlights across one collection"
+    )
     p.add_argument("-a", "--all", action="store_true", help="fetch all pages")
     p.add_argument("--page", type=int, default=0, help="page number")
     p.add_argument("--perpage", type=int, default=25, help="items per page (max 50)")
+
+    p = _p(
+        hsub,
+        "export",
+        common,
+        commands.cmd_highlights_export,
+        help="export all highlights as markdown grouped by source",
+    )
+    p.add_argument("-o", "--output", help="write to a file instead of stdout")
 
     p = _p(hsub, "add", common, commands.cmd_highlights_add, help="add a highlight")
     p.add_argument("raindrop", type=int, help="raindrop id")
@@ -456,6 +469,16 @@ def _add_pinboard_commands(sub, common):
     p.add_argument("--tag", action="append", help="filter by tag (repeatable, max 3)")
     p.add_argument("--count", type=int, default=15, help="recent count (max 100)")
     p.add_argument("-a", "--all", action="store_true", help="fetch all bookmarks")
+    p.add_argument(
+        "--from",
+        dest="from_dt",
+        help="with --all: only posts saved on/after this UTC time (Pinboard fromdt)",
+    )
+    p.add_argument(
+        "--to",
+        dest="to_dt",
+        help="with --all: only posts saved up to this UTC time (Pinboard todt)",
+    )
     p.add_argument("--toread", action="store_true", help="only unread (to-read) items")
     p.add_argument("-d", "--detailed", action="store_true", help="show description")
 
@@ -584,6 +607,15 @@ def _add_misc_commands(sub, common):
 
     p = _p(
         sub,
+        "dupes",
+        common,
+        commands.cmd_dupes,
+        needs_client=False,
+        help="report URLs saved more than once within a service (read-only)",
+    )
+
+    p = _p(
+        sub,
         "filters",
         common,
         commands.cmd_filters,
@@ -676,6 +708,20 @@ def _add_config_commands(sub, common):
         help="store the Pinboard API token",
     )
     p.add_argument("token", help="Pinboard token (format user:HEX)")
+
+    p = _p(
+        csub,
+        "check",
+        common,
+        commands.cfg_check,
+        needs_client=False,
+        help="which config file is in effect and where each token resolves from",
+    )
+    p.add_argument(
+        "--ping",
+        action="store_true",
+        help="also call each service's cheapest read to prove the tokens work",
+    )
 
 
 # -- back-compat aliases ------------------------------------------------------

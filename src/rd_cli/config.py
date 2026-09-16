@@ -99,6 +99,18 @@ def parse_env(text: str) -> dict[str, str]:
     return result
 
 
+def env_file_in_effect(paths: list[Path] | None = None) -> Path | None:
+    """The first ``.env`` candidate that exists: the file ``load_env_files``
+    reads, and the one a token may be riding in on."""
+    if paths is None:
+        paths = [
+            Path.cwd() / ".env",
+            config_dir() / ".env",
+            legacy_config_dir() / ".env",
+        ]
+    return next((p for p in paths if p.is_file()), None)
+
+
 def load_env_files(paths: list[Path] | None = None) -> dict[str, str]:
     """Load the first existing ``.env`` file into ``os.environ`` (non-clobbering).
 
@@ -115,15 +127,14 @@ def load_env_files(paths: list[Path] | None = None) -> dict[str, str]:
             legacy_config_dir() / ".env",
         ]
     injected: dict[str, str] = {}
-    for path in paths:
-        if not path.is_file():
-            continue
-        for key, value in parse_env(path.read_text(encoding="utf-8")).items():
-            if key not in os.environ:
-                os.environ[key] = value
-                injected[key] = value
-                _injected[key] = value
+    path = env_file_in_effect(paths)
+    if path is None:
         return injected
+    for key, value in parse_env(path.read_text(encoding="utf-8")).items():
+        if key not in os.environ:
+            os.environ[key] = value
+            injected[key] = value
+            _injected[key] = value
     return injected
 
 
@@ -144,8 +155,13 @@ def read_config() -> dict:
     return {}
 
 
-def _resolve_secret(env_vars: list[str], config_value: object) -> str | None:
-    """Documented precedence: env var, then config.toml, then ``.env``.
+def _locate_secret(
+    env_vars: list[str], config_value: object
+) -> tuple[str | None, dict]:
+    """The documented precedence walk, paired with the tier it resolved from.
+
+    The tier names where a token came from (and which env var) without ever
+    carrying the value, which is what ``rd config check`` reports.
 
     A variable holding the exact value a ``.env`` file injected (per the
     module-level registry) skips the env round and only wins when config has
@@ -154,14 +170,31 @@ def _resolve_secret(env_vars: list[str], config_value: object) -> str | None:
     for var in env_vars:
         token = os.environ.get(var)
         if token and _injected.get(var) != token:
-            return token
+            return token, {"tier": "environment", "var": var}
     if isinstance(config_value, str) and config_value.strip():
-        return config_value
+        return config_value, {"tier": "config.toml"}
     for var in env_vars:
         token = os.environ.get(var)
         if token and _injected.get(var) == token:
-            return token
-    return None
+            return token, {"tier": ".env", "var": var}
+    return None, {"tier": None}
+
+
+def _resolve_secret(env_vars: list[str], config_value: object) -> str | None:
+    """Documented precedence: env var, then config.toml, then ``.env``."""
+    return _locate_secret(env_vars, config_value)[0]
+
+
+def locate_token(kind: str) -> tuple[str | None, dict]:
+    """Resolve the Raindrop (``kind="raindrop"``) or Pinboard (``"pinboard"``)
+    token, returning it paired with the tier it came from. Call
+    :func:`load_env_files` first so ``.env`` values are visible. The tier
+    never carries the value; that is the point of ``rd config check``."""
+    if kind == "raindrop":
+        return _locate_secret(ENV_VARS, read_config().get("token"))
+    if kind == "pinboard":
+        return _locate_secret(PINBOARD_ENV_VARS, read_config().get("pinboard_token"))
+    raise ValueError(f"unknown token kind: {kind!r}")
 
 
 def resolve_token() -> str:

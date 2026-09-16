@@ -1,0 +1,74 @@
+# project.done: raindrop-cli
+
+Completed: 2026-09-15 (THE FINAL BLITZ; manager verification pending as of
+this writing). Release: v0.7.0, published to PyPI (tag push 2026-09-16T00:30Z
+UTC, Brandon-approved). HEAD at completion: 251f8fa on main, pushed, CI green.
+
+## What shipped (the Final audit 2026-09-13 ranked list, executed)
+
+- normalize_url crash guard (junk-port bookmarks fall back to the raw URL as
+  the match key; `rd sync` no longer tracebacks on one bad bookmark).
+- `_transport.py`: shared HTTP core for both clients (ORG-1); the
+  transient-error family broadened to OSError + HTTPException (connection
+  resets and IncompleteRead retry now); Pinboard honors Retry-After; writes
+  are never retried on transport failures (double-create guard).
+- The --json contract cluster: guards and confirm refusals emit
+  `{"error"}` on stdout in JSON mode; empty_code honored in JSON mode;
+  id-mode `rm` emits the spec's `{"result": bool}`; export --json requires
+  -o and emits a metadata document; completion --json refuses; config path
+  --json emits a document; OSError/JSONDecodeError caught at the command
+  boundary.
+- Batch add rejects the five per-item value flags and honors --no-parse.
+- perpage clamp inside the iterators; --perpage honored with --all.
+- Release/publish automation: pytest/ruff pinned; publish.yml cuts the
+  Release from the tag (with fetch-depth: 0 so the notes are the verbatim
+  tag message); the pypi environment bound to `v*` tags (branch AND tag
+  policies); Releases created for v0.5.2 and v0.6.0.
+- pyproject metadata: Pinboard + sync in description/keywords; classifiers;
+  Changelog URL. Live on PyPI as of v0.7.0.
+- New commands: `rd config check [--ping]`; `rd highlights list -c` +
+  source titles; `rd highlights export`; `rd pinboard list --from/--to`;
+  `rd dupes`.
+- Sync semantics: in-scope duplicate preferred as representative; created
+  stamps normalized to Pinboard's dt shape; `--from 0` rejected locally;
+  --dry-run threaded into both sync clients.
+- Output polish: `rd view` highlight colors routed through _HL_CODES;
+  NO_COLOR="" counts as unset; CJK width; multipart filename escaping;
+  silent BrokenPipe shutdown; id-mode `tag --clear` prompts.
+- Comment/docs truth batch, the em-dash sweep, patchnotes heading
+  normalization, the README/spec/CLAUDE doc smalls, the Phase 6
+  wrongly-ticked box unticked, and the roadmap Final-blitz section with
+  per-box notes.
+
+## Reopen conditions (gated items asked 2026-09-15 and unanswered; status quo preserved)
+
+1. The library-graduation ledger: seven unwired client methods
+   (expand_collections, get_user_by_name, parse_url, featured_covers,
+   upload_file, delete_collections, last_update) remain deliberate surface;
+   record-the-ledger vs wire-them is still Brandon's call (house rule).
+2. dependabot opt-in (github-actions): declined by inaction; ask again if
+   wanted.
+3. SECURITY.md on the public token-handling PyPI CLI: not created (gated).
+4. SORTS "-sort": confirmed bogus against the local official docs mirror
+   (documented values include "-score" but no "-sort"; an undocumented "n"
+   also exists); the argparse choices change is gated on Brandon's
+   live-docs confirm.
+5. `rd sync --limit N`: gated flag semantics (leaned plan recorded in the
+   roadmap's Final-blitz section).
+6. `--collection` accepts titles: gated flag semantics.
+7. The removal batch: tag_message.txt at the repo root, the .gitignore
+   template prune, the no_sleep fixture, the dead _CODES bold/dim entries,
+   and the dead re-check branch in plan_sync are all removal candidates
+   awaiting their own per-item answer. NOTE: tag_message.txt is stale
+   v0.6.1 scratch; the release procedure now writes scratch outside the
+   repo (/tmp was used for v0.7.0).
+8. .python-version pin to 3.11: attempted and reverted; no 3.11 interpreter
+   is installed locally and uv Python downloads are manual, so the pin
+   broke `uv run`. Revisit only with a locally installed 3.11.
+9. Parked features (roadmap Final-blitz section, recorded order): backups
+   download --latest; apply_plan progress output; exists --exit-code;
+   pinboard add --file/--stdin; rd context/--schema; --fields/--format;
+   config profiles; fzf picker. The sync fast-path is design-blocked until
+   the persistent manifest exists.
+10. BrE/AmE prose normalization: declined this window as a cosmetic sweep
+    with high churn.

@@ -188,6 +188,52 @@ def test_raindrop_to_pinboard_carries_created_dt():
     assert sync.raindrop_to_pinboard({"link": "https://x.com"}, {})["dt"] == ""
 
 
+def test_pb_dt_normalizes_raindrop_stamps_to_pinboard_shape():
+    # Raindrop's created carries millis; Pinboard documents
+    # ccy-MM-ddTHH:MM:SSZ and silently re-dates on a rejected dt.
+    assert sync.pb_dt("2024-05-01T00:00:00.059Z") == "2024-05-01T00:00:00Z"
+    assert sync.pb_dt("2024-05-01T12:30:45+02:00") == "2024-05-01T10:30:45Z"
+    assert sync.pb_dt("2024-05-01T03:00:00") == "2024-05-01T03:00:00Z"
+    assert sync.pb_dt("") == ""
+    assert sync.pb_dt(None) == ""
+    # Unparseable input passes through verbatim rather than being dropped.
+    assert sync.pb_dt("not a date") == "not a date"
+
+
+def test_plan_sync_prefers_in_scope_duplicate():
+    # The first sighting of a URL decides nothing: if it is out of scope and a
+    # later duplicate is in scope, the in-scope one is the representative that
+    # gets pushed.
+    raindrops = [
+        {
+            "_id": 1,
+            "link": "https://x.com/p",
+            "title": "out-of-scope first",
+            "tags": [],
+            "collection": {"$id": 9},  # out of scope
+        },
+        {
+            "_id": 2,
+            "link": "https://x.com/p/",
+            "title": "in-scope second",
+            "tags": [],
+            "collection": {"$id": 5},  # in scope, same normalized URL
+        },
+    ]
+    plan = sync.plan_sync(
+        raindrops,
+        [],
+        {},
+        {},
+        rd_keep=lambda r: (r.get("collection") or {}).get("$id") == 5,
+    )
+    assert plan.rd_dupes == 1
+    # ...and the pushed fields are the in-scope raindrop's, not the first's
+    # (the URL is record 2's raw link; the title proves the record choice)
+    assert [f["url"] for f in plan.to_pinboard] == ["https://x.com/p/"]
+    assert plan.to_pinboard[0]["title"] == "in-scope second"
+
+
 def test_raindrop_to_pinboard_tolerates_missing_link():
     out = sync.raindrop_to_pinboard({"title": "no link"}, {})
     assert out["url"] == ""

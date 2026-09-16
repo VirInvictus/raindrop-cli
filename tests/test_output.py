@@ -94,3 +94,35 @@ def test_highlight_line_maps_raindrop_color_names(monkeypatch):
     assert "chartreuse" not in unknown.split("x")[0]
     muted = output.format_highlight_line({"_id": 3, "text": "x"})
     assert "\033[2m" in muted
+
+
+def test_detail_highlight_markers_route_through_hl_codes(monkeypatch):
+    # rd view used to pass the raw API color name ("red") to color(), which is
+    # not a palette key, so the marker rendered colorless while `rd highlights
+    # list` (which maps through _HL_CODES) was fine.
+    monkeypatch.setattr(output, "_color_enabled", True)
+    detail = output.format_raindrop_detail(
+        {"_id": 1, "highlights": [{"text": "q", "color": "red"}]}
+    )
+    assert "\033[38;5;174m" in detail  # "red" mapped to the palette's error red
+
+
+def test_no_color_empty_string_counts_as_unset(monkeypatch):
+    # The NO_COLOR standard: present-but-empty is unset.
+    monkeypatch.setenv("NO_COLOR", "")
+
+    class TTY(io.StringIO):
+        def isatty(self):
+            return True
+
+    output.configure(stream=TTY())
+    assert output._color_enabled is True
+    monkeypatch.setenv("NO_COLOR", "1")
+    output.configure(stream=TTY())
+    assert output._color_enabled is False
+
+
+def test_visible_len_counts_wide_characters_as_two():
+    assert output._visible_len("中文") == 4
+    assert output._visible_len("a中b") == 4
+    assert output._visible_len("ascii") == 5

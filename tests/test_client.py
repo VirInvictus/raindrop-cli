@@ -292,6 +292,19 @@ def test_multipart_contains_boundary_and_parts():
     assert b"hello" in body
 
 
+def test_multipart_escapes_quotes_and_linebreaks():
+    # A filename with a quote or CRLF would break out of the Content-
+    # Disposition field (or inject a header line); both are neutralized.
+    body, _ = client_mod._multipart(
+        {"file": ('we"ird\r\nname.txt', b"hello", "text/plain")}, {}
+    )
+    disposition = [
+        line for line in body.split(b"\r\n") if line.startswith(b"Content-Disposition:")
+    ]
+    assert len(disposition) == 1  # the filename stayed on the one header line
+    assert b'\\"' in disposition[0]  # the quote was escaped, not raw
+
+
 def test_collection_payload_parent_shape():
     payload = client_mod._collection_payload(title="X", parent_id=9)
     assert payload == {"title": "X", "parent": {"$id": 9}}

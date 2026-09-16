@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import unicodedata
 from typing import Any
 
 # ANSI SGR codes.
@@ -49,12 +50,15 @@ _color_enabled = True
 
 
 def configure(*, no_color: bool = False, stream=None) -> None:
-    """Decide whether colour is on, based on flags, env, and TTY status."""
+    """Decide whether colour is on, based on flags, env, and TTY status.
+
+    ``NO_COLOR`` follows the standard: a non-empty value disables colour; an
+    empty value counts as unset."""
     global _color_enabled
     stream = stream or sys.stdout
     _color_enabled = not (
         no_color
-        or os.environ.get("NO_COLOR") is not None
+        or bool(os.environ.get("NO_COLOR"))
         or not hasattr(stream, "isatty")
         or not stream.isatty()
     )
@@ -171,7 +175,11 @@ def format_raindrop_detail(item: dict) -> str:
     if highlights:
         lines.append(f"  {color('highlights:', 'muted')}")
         for hl in highlights:
-            lines.append(f"    {color('▍', hl.get('color', 'muted'))} {hl.get('text')}")
+            # Raindrop's color names ("red") are not palette keys; route
+            # through _HL_CODES like the list path does, or the marker
+            # renders colorless.
+            marker = color("▍", _HL_CODES.get(hl.get("color", ""), "muted"))
+            lines.append(f"    {marker} {hl.get('text')}")
     return "\n".join(lines)
 
 
@@ -343,7 +351,8 @@ def _columns(rows: list[tuple[str, ...]], headers: tuple[str, ...] | None) -> st
 
 
 def _visible_len(text: str) -> int:
-    """Length of ``text`` ignoring ANSI escape sequences."""
+    """Rendered width of ``text``, ignoring ANSI escape sequences and counting
+    East Asian wide/fullwidth characters as two terminal columns."""
     result = 0
     i = 0
     while i < len(text):
@@ -352,9 +361,9 @@ def _visible_len(text: str) -> int:
             if end == -1:
                 break
             i = end + 1
-        else:
-            result += 1
-            i += 1
+            continue
+        result += 2 if unicodedata.east_asian_width(text[i]) in ("W", "F") else 1
+        i += 1
     return result
 
 

@@ -1133,9 +1133,10 @@ def cfg_set_pinboard_token(client: Any, args: Any) -> int:
 
 def cmd_sync(client: Any, args: Any) -> int:
     """Two-way additive sync. Reads both services, builds a plan, prints it, and
-    (unless --dry-run) applies it. Needs both tokens."""
-    rd = RaindropClient(config.resolve_token())
-    pb = PinboardClient(config.resolve_pinboard_token())
+    (unless --dry-run) applies it. Needs both tokens. Both clients are built
+    with the run's dry-run flag, so every write below is blocked twice."""
+    rd = RaindropClient(config.resolve_token(), dry_run=args.dry_run)
+    pb = PinboardClient(config.resolve_pinboard_token(), dry_run=args.dry_run)
 
     raindrops = list(rd.iter_raindrops(0))
     pb_posts = pb.get_all()

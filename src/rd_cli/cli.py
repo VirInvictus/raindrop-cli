@@ -1,17 +1,19 @@
 """Argument parsing and dispatch.
 
-A shared ``common`` parent parser carries ``--json`` and ``--no-color`` onto
-every subcommand, so they work in any position (``rd list --json`` as well as
-``rd --json list``). Each subparser stores its handler in ``func`` and whether
-it needs an API client in ``needs_client``; ``main`` resolves the token and
-builds the :class:`RaindropClient` only when required (config subcommands do
-not touch the network).
+A shared ``common`` parent parser carries ``--json``, ``--no-color``,
+``--dry-run``, and ``-y/--yes`` onto every subcommand, so they work in any
+position (``rd list --json`` as well as ``rd --json list``). Each subparser
+stores its handler in ``func`` and whether it needs an API client in
+``needs_client``; ``main`` resolves the token and builds the
+:class:`RaindropClient` only when required (config subcommands do not touch
+the network).
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 
 from . import __version__, commands, completion, config, output
@@ -466,7 +468,11 @@ def _add_pinboard_commands(sub, common):
     psub = pb.add_subparsers(dest="subcommand", metavar="<action>", required=True)
 
     p = _pb(psub, "list", common, commands.cmd_pb_list, help="list bookmarks")
-    p.add_argument("--tag", action="append", help="filter by tag (repeatable, max 3)")
+    p.add_argument(
+        "--tag",
+        action="append",
+        help="filter by tag (repeatable; Pinboard accepts up to 3 per query)",
+    )
     p.add_argument("--count", type=int, default=15, help="recent count (max 100)")
     p.add_argument("-a", "--all", action="store_true", help="fetch all bookmarks")
     p.add_argument(
@@ -789,8 +795,10 @@ def main(argv: list[str] | None = None) -> int:
             client = RaindropClient(config.resolve_token(), dry_run=args.dry_run)
         return args.func(client, args)
     except BrokenPipeError:
-        # Before the OSError catch: a closed `| head` is a clean exit, not an
-        # error to report (into a pipe that is already gone).
+        # Before the OSError catch: a closed `| head` is a clean exit. Point
+        # stdout at devnull so the interpreter's shutdown flush cannot re-raise
+        # the pipe error as stderr noise after we return.
+        os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
         return 0
     except RaindropError as exc:
         if getattr(args, "json", False):

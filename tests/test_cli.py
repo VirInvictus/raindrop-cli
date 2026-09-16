@@ -583,6 +583,30 @@ def test_sync_human_apply_prints_summary(run_sync):
     assert "synced: +1 to pinboard, +0 to raindrop, 0 merged" in out
 
 
+def test_sync_passes_dry_run_to_both_clients(monkeypatch, capsys):
+    # Defense in depth: the command returns before apply_plan under --dry-run,
+    # but the clients themselves are write-blocked too.
+    built = {}
+
+    class C:
+        def __init__(self, *a, **k):
+            built[len(built)] = k.get("dry_run")
+
+        def __getattr__(self, name):
+            if name == "iter_raindrops":
+                return lambda *a, **k: []
+            return lambda *a, **k: []
+
+    monkeypatch.setattr(cli.config, "resolve_token", lambda: "rd-tok")
+    monkeypatch.setattr(cli.config, "resolve_pinboard_token", lambda: "pb:tok")
+    monkeypatch.setattr(cli.commands, "RaindropClient", C)
+    monkeypatch.setattr(cli.commands, "PinboardClient", C)
+    code = cli.main(["sync", "--dry-run"])
+    capsys.readouterr()
+    assert code == 0
+    assert built == {0: True, 1: True}
+
+
 def test_sync_merge_preserves_pinboard_date(run_sync):
     code, out, rd, pb = run_sync(
         ["sync", "--json"],

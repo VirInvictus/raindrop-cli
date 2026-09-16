@@ -641,14 +641,14 @@ def _multipart(
     parts: list[bytes] = []
     for name, value in form.items():
         parts.append(f"--{boundary}".encode())
-        parts.append(f'Content-Disposition: form-data; name="{name}"'.encode())
+        parts.append(f'Content-Disposition: form-data; name="{_escape(name)}"'.encode())
         parts.append(b"")
         parts.append(value.encode("utf-8"))
     for name, (filename, content, mime) in files.items():
         parts.append(f"--{boundary}".encode())
         parts.append(
-            f'Content-Disposition: form-data; name="{name}"; '
-            f'filename="{filename}"'.encode()
+            f'Content-Disposition: form-data; name="{_escape(name)}"; '
+            f'filename="{_escape(filename)}"'.encode()
         )
         parts.append(f"Content-Type: {mime}".encode())
         parts.append(b"")
@@ -657,6 +657,17 @@ def _multipart(
     parts.append(b"")
     body = crlf.join(parts)
     return body, f"multipart/form-data; boundary={boundary}"
+
+
+def _escape(value: str) -> str:
+    """Keep a header-field value on one line: a filename carrying a quote or
+    CRLF would otherwise break out of the Content-Disposition field."""
+    return (
+        value.replace("\\", "\\\\")
+        .replace('"', '\\"')
+        .replace("\r", " ")
+        .replace("\n", " ")
+    )
 
 
 def _dry_run_preview(

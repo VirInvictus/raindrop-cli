@@ -18,13 +18,14 @@ The package was named ``rd-cli`` until the September 2026 rename, and the
 rename shipped without migrating anyone's config, so the old
 ``$XDG_CONFIG_HOME/rd-cli/config.toml`` stays a read fallback: when the
 current path has no config yet, the legacy one is read. Writes always go to
-the current path, and because the writer preserves every key it read, the
-first ``rd config set-*`` repatriates the legacy file wholesale.
+the current path, and because the writer preserves every scalar key it read,
+the first ``rd config set-*`` repatriates the legacy file.
 """
 
 from __future__ import annotations
 
 import os
+import sys
 import tomllib
 from pathlib import Path
 
@@ -246,8 +247,12 @@ def write_pinboard_token(token: str) -> Path:
 
 
 def _write_config_key(key: str, value: str) -> Path:
-    """Set one string key in ``config.toml`` (0600), preserving every other key.
-    The written key is emitted first; order is cosmetic."""
+    """Set one string key in ``config.toml`` (0600), preserving the other
+    scalar keys. The written key is emitted first; order is cosmetic.
+
+    A hand-edited non-scalar value (a TOML table or array) has no
+    representation in this flat writer, so it is skipped with a warning
+    instead of being repr-flattened into a corrupt string."""
     value = value.strip()
     if not value:
         raise ConfigError(f"Refusing to write an empty {key}.")
@@ -259,13 +264,21 @@ def _write_config_key(key: str, value: str) -> Path:
     for other, val in data.items():
         if other == key:
             continue
+        if not isinstance(val, (str, int, float, bool)):
+            print(
+                f"warning: config key {other!r} is not a plain value; "
+                "it was not preserved in the rewrite",
+                file=sys.stderr,
+            )
+            continue
         lines.append(_toml_line(other, val))
     # Atomic write: a crash mid-write must not truncate the config (the API
-    # tokens live here). chmod the temp before the swap so the file is never
-    # readable by anyone else, even for a moment.
+    # tokens live here). The temp file is created with 0600 from the start so
+    # it is never readable by anyone else, even for a moment.
     tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    tmp.chmod(0o600)
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write("\n".join(lines) + "\n")
     os.replace(tmp, path)
     return path
 

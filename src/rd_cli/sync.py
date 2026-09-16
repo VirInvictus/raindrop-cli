@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
@@ -79,6 +80,26 @@ def _slug(title: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", title.strip().lower()).strip("-")
 
 
+def pb_dt(iso: str | None) -> str:
+    """A timestamp in Pinboard's ``dt`` shape: ``YYYY-MM-DDTHH:MM:SSZ`` UTC.
+
+    Raindrop's ``created`` carries milliseconds, which is outside what
+    Pinboard documents; a rejected dt makes the add silently re-date the
+    bookmark to now (the same class the 0.6.1 merge fix addressed). Anything
+    unparseable comes back unchanged rather than dropped, so a weird stamp
+    degrades to today's verbatim behavior."""
+    if not iso:
+        return ""
+    raw = iso.strip()
+    try:
+        moment = datetime.fromisoformat(raw)
+    except ValueError:
+        return raw
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=UTC)
+    return moment.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 def find_duplicates(
     records: list[dict], key_field: str
 ) -> list[tuple[str, list[dict]]]:
@@ -119,7 +140,7 @@ def raindrop_to_pinboard(rd: dict, coll_title_by_id: dict[int, str]) -> dict:
         # None omits the request param, so Pinboard's account-wide default
         # privacy applies; hardcoding True made every pushed bookmark public.
         "shared": None,
-        "dt": rd.get("created") or "",
+        "dt": pb_dt(rd.get("created")),
     }
 
 
@@ -198,6 +219,10 @@ def plan_sync(
         key = normalize_url(link)
         if key in rd_by_norm:
             rd_dupes += 1
+            # Prefer an in-scope representative: an out-of-scope first
+            # sighting must not hide an in-scope duplicate from being pushed.
+            if not rd_keep(rd_by_norm[key]) and rd_keep(rd):
+                rd_by_norm[key] = rd
         else:
             rd_by_norm[key] = rd
     pb_by_norm: dict[str, dict] = {}
@@ -209,6 +234,8 @@ def plan_sync(
         key = normalize_url(href)
         if key in pb_by_norm:
             pb_dupes += 1
+            if not pb_keep(pb_by_norm[key]) and pb_keep(pb):
+                pb_by_norm[key] = pb
         else:
             pb_by_norm[key] = pb
 

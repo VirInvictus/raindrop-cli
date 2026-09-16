@@ -222,6 +222,25 @@ def test_write_config_is_atomic_and_private(monkeypatch, tmp_path):
     assert (stat.S_IMODE(path.stat().st_mode) & 0o777) == 0o600
 
 
+def test_write_config_skips_non_scalar_keys_with_warning(monkeypatch, tmp_path, capsys):
+    # A hand-edited TOML table has no representation in the flat writer; it is
+    # skipped with a warning instead of repr-flattened into a corrupt string.
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    monkeypatch.chdir(tmp_path)  # avoid picking up a stray ./.env
+    cfg_dir = tmp_path / "raindrop-cli"
+    cfg_dir.mkdir()
+    (cfg_dir / "config.toml").write_text('token = "keep"\n[table]\nx = 1\n')
+    path = config._write_config_key("pinboard_token", "TOK")
+    err = capsys.readouterr().err
+    assert "not a plain value" in err
+    import tomllib
+
+    parsed = tomllib.loads(path.read_text())
+    assert parsed["pinboard_token"] == "TOK"
+    assert parsed["token"] == "keep"
+    assert "table" not in parsed
+
+
 # -- pre-rename config directory (rd-cli -> raindrop-cli, no migration) --------
 
 

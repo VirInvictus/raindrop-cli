@@ -1,12 +1,13 @@
 # CLAUDE.md
 
-Guidance for Claude Code working in **raindrop-cli**, a stdlib-only command-line
-client for the [Raindrop.io](https://raindrop.io) bookmarking service. This file
-documents both the Raindrop REST API and this codebase. Read it before changing
-API behavior or the command surface.
+Guidance for coding agents working in **raindrop-cli**, a stdlib-only
+command-line client for the [Raindrop.io](https://raindrop.io) bookmarking
+service. This file documents both the Raindrop REST API and this codebase. Read
+it before changing API behavior or the command surface.
 
-The portfolio conventions in `~/.claude/CLAUDE.md` and `~/.gitrepos/CLAUDE.md`
-apply. Where they conflict with this file, this file wins for raindrop-cli.
+The portfolio conventions in `~/.zcode/AGENTS.md` (the workspace core rules)
+and `~/.gitrepos/CLAUDE.md` (the repo catalog) apply. Where they conflict with
+this file, this file wins for raindrop-cli.
 
 ## What this is
 
@@ -28,10 +29,10 @@ House constraints that shaped it:
 
 - **Zero runtime dependencies.** Pure stdlib (`urllib`, `json`, `tomllib`,
   `argparse`). No `requests`, no `python-dotenv`. Matches the stdlib-lean CLI
-  siblings (CalibreQuarry, Bindery, oceanstrip). Do not add a dependency without
-  asking Brandon.
-- **Local-first, no accounts beyond the token.** No OAuth server flow yet; a
-  personal test token is enough (see Auth).
+  siblings (CalibreQuarry, Bindery). Do not add a dependency without asking
+  Brandon.
+- **Local-first, no accounts beyond the token.** The OAuth server flow is
+  retired (2026-09); a personal test token is enough (see Auth).
 - **TTY-aware output.** Colour on a terminal, plain when piped, `NO_COLOR`
   and `--no-color` respected.
 
@@ -46,6 +47,7 @@ raindrop-cli/
     __main__.py            python -m rd_cli entry
     errors.py              exception hierarchy (RaindropError base)
     config.py              token + config resolution (env -> config.toml -> .env)
+    _transport.py          shared HTTP core: retry loop, transient family, error mapping
     client.py              RaindropClient: the whole API over urllib  <-- core
     pinboard.py            PinboardClient: stdlib sibling of RaindropClient
     sync.py                two-way additive sync (pure planner + apply_plan)
@@ -80,26 +82,38 @@ forking. Not now; post-1.0 call.
   writes go to the current path and preserve every key they read (so the
   first `rd config set-*` repatriates the legacy file), and
   `effective_config_path()` reports the file actually in effect.
-- **`RaindropClient._request()`** is the only place that touches the network.
-  It attaches auth, applies a timeout, lowercases boolean query params,
-  JSON-encodes bodies, retries `429`/`5xx` and transient transport errors
-  (including bare `TimeoutError`: socket.timeout on 3.10+, raised by the
-  response read without a URLError wrapper), and maps errors to typed
-  exceptions. Add endpoints as small methods that delegate to it. The
-  constructor takes `opener` and `sleep` so tests inject a fake transport
-  (see `tests/conftest.py`). `PinboardClient._request` mirrors the shape with
-  explicit `write=True` flags and a rate-limit pacer.
+- **`_transport.py`** is the shared HTTP core both clients delegate to:
+  `send_with_retries()` owns the retry loop, `TRANSIENT` is the transient-error
+  family (`OSError` + `http.client.HTTPException`, so URLError, bare
+  `TimeoutError`, ConnectionResetError, and IncompleteRead all retry), and
+  `retry_wait()`/`to_api_error()`/`encode_params()` live here once. A change
+  to the retry family lands in exactly one place; the TimeoutError fix once
+  had to be applied to both clients by hand. **Writes are never retried on
+  transport failures** (`transport_retry=False`): after a timeout the
+  server-side outcome is unknown and re-sending a POST could double-create.
+- **`RaindropClient._request()`** builds the request (auth header, timeout,
+  lowercased boolean query params, JSON/multipart bodies), short-circuits
+  `--dry-run` for non-GETs, and hands the send to `send_with_retries`. Add
+  endpoints as small methods that delegate to it. The constructor takes
+  `opener` and `sleep` so tests inject a fake transport (see
+  `tests/conftest.py`). `PinboardClient._request` mirrors the shape with
+  explicit `write=True` flags (which also decide the no-retry rule, since
+  Pinboard's mutators are GETs) and a rate-limit pacer hooked in as
+  `before_attempt`.
 - **`output.configure()`** decides colour once per run; **`output.color()`** is
   a no-op when colour is off. Domain formatters (`format_raindrop_line`,
   `format_collection_tree`, ...) never print; they return strings.
 - **`commands.cmd_*(client, args)`** handlers return an exit code and route
-  output through the two `--json` chokepoints: `_out` (write-shaped: JSON
-  emits the payload, human prints a success/error line, one exit-code rule for
-  both modes) and `_rendered` (list-shaped: JSON emits the raw payload, human
-  prints rendered rows or an empty-state). Commands with genuinely bespoke
-  human output (`user`, `stats`, `filters`, `sync`, `open`, `config show`,
-  `pb get`, `exists`) keep an explicit `if args.json:` branch. `cfg_*`
-  handlers do not need a client.
+  output through the `--json` chokepoints: `_out` (write-shaped: JSON emits
+  the payload, human prints a success/error line, one exit-code rule for both
+  modes), `_rendered` (list-shaped: JSON emits the raw payload, human prints
+  rendered rows or an empty-state; `empty_code` is honored in both modes), and
+  `_fail` (JSON-aware guard errors: `{"error": ...}` on stdout in JSON mode,
+  the stderr line for humans). Commands with genuinely bespoke human output
+  (`user`, `stats`, `filters`, `sync`, `open`, `config show`, `pb get`,
+  `pb suggest`, `pb notes view`, `exists`, `dupes`, `highlights export`) keep
+  an explicit `if args.json:` branch; the StubClient tests pin both output
+  modes per command. `cfg_*` handlers do not need a client.
 - **`cli.build_parser()`** wires everything. A shared `common` parent parser
   carries `--json`/`--no-color` onto every subcommand (with `SUPPRESS` defaults
   so a flag before the subcommand is not clobbered by the child's default;
@@ -195,7 +209,7 @@ targeting `-99`) deletes it permanently.
 
 **Verified batch-scope quirk (important, empirically tested 2026-07-18).**
 `PUT /raindrops/{cid}` and `DELETE /raindrops/{cid}` with an `ids` body only
-affect raindrops **that are actually in `{cid}`** — the `ids` list filters
+affect raindrops **that are actually in `{cid}`**: the `ids` list filters
 *within* that path collection, it does not select globally. Consequences:
 
 - Path `cid` must be a real collection (a bogus id 404s).
@@ -346,12 +360,13 @@ them working.
 rd list | search | view | open | add | edit | rm | mv | tag | cover | import | export
 rd collections (c)  list|tree|view|add|edit|rm|merge|clean|empty-trash|reorder|cover|covers
 rd tags (t)         list|rename|merge|rm
-rd highlights (h)   list|add|edit|rm
+rd highlights (h)   list (-r raindrop | -c collection)|add|edit|rm|export (markdown)
 rd user [show|set] | stats | filters | suggest | exists | completion <shell>
 rd backups          list|create|download
-rd pinboard (pb)    list|get|add|rm|edit|tag|suggest ; tags list|rename|rm ; notes list|view
+rd pinboard (pb)    list (--from/--to with --all)|get|add|rm|edit|tag|suggest ; tags list|rename|rm ; notes list|view
 rd sync             two-way additive Raindrop<->Pinboard sync (--dry-run, scoping)
-rd config           path|show|set-token|set-pinboard-token
+rd dupes            read-only per-service duplicate report (both tokens)
+rd config           path|show|check [--ping]|set-token|set-pinboard-token
 ```
 
 The `pinboard` group is dispatched to a `PinboardClient` (not the Raindrop
@@ -359,18 +374,25 @@ client): `cli.main()` builds one when a subparser carries `needs_pinboard`
 (set by the `_pb` helper), resolving the token via `config.resolve_pinboard_token`.
 
 `rd sync` (`commands.cmd_sync`, `needs_client=False`) builds *both* clients
-itself and drives `sync.py`. The planner (`sync.plan_sync` + the mapping helpers)
+itself and drives `sync.py` (both with the run's `--dry-run` flag, so writes
+are blocked twice). The planner (`sync.plan_sync` + the mapping helpers)
 is pure and network-free; only `sync.apply_plan` writes. It is **additive only**
 (adds + merges, never deletes), matches by `sync.normalize_url` (which is also
-the dedup key), and bridges the model gap reversibly in tags (collection <-> slug
+the dedup key; a URL too malformed to parse falls back to its raw form as the
+key instead of crashing), and bridges the model gap reversibly in tags (collection <-> slug
 tag, `toread`, `important`). Scope flags (`--direction`, `--collection`,
 `--rd-tag`, `--pb-tag`) narrow what is *written* while matching stays on the full
 sets, so an out-of-scope item already present on the other side is never
-re-imported. Timestamps survive merges: `apply_plan` re-adds a merged Pinboard
-post with its original `time` as `dt`, and a push omits the `shared` flag so
+re-imported; on a duplicate key the first **in-scope** record is the
+representative. Timestamps survive merges: `apply_plan` re-adds a merged Pinboard
+post with its original `time` as `dt`, and a push passes the raindrop's
+`created` through `sync.pb_dt` (Pinboard's documented UTC-Z shape; millis
+stripped, unparseable input verbatim) and omits the `shared` flag so
 Pinboard's account default decides visibility (a merge keeps the post's own).
 Delete propagation / conflict resolution (needs a persistent
-manifest) is deliberately not built; see `roadmap.md` Phase 6.
+manifest) is deliberately not built; see `roadmap.md` Phase 6. A
+last_update()-based sync fast-path is recorded as design-blocked in the
+roadmap: safe change detection needs that manifest.
 
 `rd sync --json` obeys the single-document contract: `--dry-run` emits the plan
 document (`to_pinboard`, `to_raindrop`, `merges`, dupes) and a real run emits
@@ -415,7 +437,7 @@ used for both so a fake transport still sees every call.
 grounded in the verified batch-scope quirk above):
 
 - `rd mv <dest> <ids...>` and `rd rm <ids...>` and `rd tag <ids...>` operate on
-  **explicit ids by looping the single-item endpoints** — correct no matter
+  **explicit ids by looping the single-item endpoints**, correct no matter
   which collection each id lives in.
 - The same commands in **scope mode** (`--from <collection>`, optional `-s
   <search>`, `-n`) use the **batch endpoints** to move/delete/tag *everything in
@@ -439,8 +461,9 @@ Note: values that start with `-` (the `-count`/`-title` sort keys) must use
 
 ## Exit codes
 
-`0` success, `1` handled error (`RaindropError`, or a false `result`), `130`
-`KeyboardInterrupt`. Broken pipe exits `0` (clean `| head`).
+`0` success, `1` handled error (`RaindropError`, filesystem/JSON-decode
+failures at the command boundary, or a false `result`), `2` argparse usage
+error, `130` `KeyboardInterrupt`. Broken pipe exits `0` (clean `| head`).
 
 ---
 

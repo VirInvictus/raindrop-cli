@@ -5,7 +5,7 @@ document defines behavior that callers (humans and scripts) may rely on. The
 API-side reference (endpoints, fields, quirks) lives in `CLAUDE.md`; this file
 covers the CLI contract.
 
-Version: see `VERSION`. Status: `0.6.1`. Raindrop is the primary backend;
+Version: see `VERSION`. Status: `0.7.0`. Raindrop is the primary backend;
 Pinboard support (`rd pinboard`) and a two-way additive `rd sync` between the two
 services landed in 0.2.0 and 0.3.0.
 
@@ -91,7 +91,16 @@ UTF-8 JSON document (indented) on stdout, and nothing else. Shapes:
   `rd_dupes`, `pb_dupes`) under `--dry-run`, and the applied counts
   (`added_pinboard`, `added_raindrop`, `merged`) on a real run. It is the only
   document either way; the human plan lines never precede it.
-- Errors emit `{"error": "<message>"}` on stdout and still exit non-zero.
+- Errors emit `{"error": "<message>"}` on stdout and still exit non-zero. This
+  includes the command-level guards and confirmation refusals, not only API
+  errors: a parsing script never meets an empty stdout on a handled failure.
+- A missing object exits non-zero in JSON mode like the human mode
+  (`rd view --json <dead-id>` emits `{}` and exits 1, as `pb get` already did).
+- Two commands are carved out because their product is not data. `export
+  --json` requires `-o` and emits a `{"path", "bytes", "format"}` document for
+  the written file (the export payload itself is raw bytes). `completion
+  --json` refuses with an error document (a completion script is shell code).
+- `rd` with no subcommand prints the help text in both modes.
 
 JSON objects are passed through from the API unchanged. Per Raindrop's docs,
 responses may contain undocumented fields; do not rely on fields not listed in
@@ -103,24 +112,26 @@ Raindrop verbs are top-level; other resources are grouped. See `CLAUDE.md` for
 the full tree and `rd --help` / `rd <group> --help` for flags. Stable command
 names and their meaning:
 
-- `list` / `search` — read raindrops (`--all` paginates; `-c/--collection`,
+- `list` / `search`: read raindrops (`--all` paginates; `-c/--collection`,
   `-s/--search`, `--sort`, `--page`, `--perpage`, `-n/--nested`, `-d/--detailed`).
-- `view <id>` — one raindrop in detail.
+- `view <id>`: one raindrop in detail.
 - `open <ids...>`: open a raindrop's URL in the browser; `--cache` (alias
   `--permanent`) opens the permanent copy instead (PRO), `--print` emits the
   URL and launches nothing. `--json` resolves and prints without launching.
-- `add <url>` — create (auto-parses metadata unless `--no-parse`; default
-  collection is Unsorted, `-1`). `--file`/`--stdin` batch-creates many URLs.
-- `edit <id>` — update fields (`--important`/`--not-important` tri-state).
-- `rm <ids...>` — move to Trash; `--permanent` deletes for good; `--from
+- `add <url>`: create (auto-parses metadata unless `--no-parse`; default
+  collection is Unsorted, `-1`). `--file`/`--stdin` batch-creates many URLs;
+  there the per-item flags (`--title`, `--tags`, `--excerpt`, `--note`,
+  `--important`) are rejected and `--no-parse` applies to the whole batch.
+- `edit <id>`: update fields (`--important`/`--not-important` tri-state).
+- `rm <ids...>`: move to Trash; `--permanent` deletes for good; `--from
   <collection> [-s search]` removes a whole scope in one batch call.
-- `mv <dest> <ids...>` — move raindrops; `--from <src> [-s search]` for scope.
-- `tag <ids...> --add/--remove/--clear` — modify tags; `--from` for scope.
+- `mv <dest> <ids...>`: move raindrops; `--from <src> [-s search]` for scope.
+- `tag <ids...> --add/--remove/--clear`: modify tags; `--from` for scope.
 - `cover <id> <file>` / `import <file> [--create -c <id>]`.
-- `export` — write csv/html/zip to a file (`-o`) or stdout.
+- `export`: write csv/html/zip to a file (`-o`) or stdout.
 - `collections` (adds `reorder`, `cover`, `covers`), `tags`, `highlights`
   groups; `user` (with `set`), `stats`, `filters`, `suggest`, `exists`,
-  `backups`, `config`.
+  `backups`, `config` (with `check`), `dupes`, `completion <shell>`.
 
 **id-list vs scope.** `mv`/`rm`/`tag` with explicit ids loop the single-item
 endpoints (correct regardless of each item's collection). With `--from` they use
@@ -134,10 +145,10 @@ and makes no API call; reads still run, so a plan can be built safely first.
 
 **Confirmation.** Destructive operations whose blast radius is unbounded
 (scope mode `rm`/`mv`/`tag --clear`) or irreversible (`rm --permanent`,
-`collections rm`, `collections empty-trash`, `tags rm`) prompt on stderr
-first; everything else runs unprompted (removing by id to Trash is
-recoverable, appending tags is additive). `-y`/`--yes` pre-answers every
-prompt and `RD_ASSUME_YES=1` does the same for scripts and cron;
+`tag <id> --clear`, `collections rm`, `collections empty-trash`, `tags rm`)
+prompt on stderr first; everything else runs unprompted (removing by id to
+Trash is recoverable, appending tags is additive). `-y`/`--yes` pre-answers
+every prompt and `RD_ASSUME_YES=1` does the same for scripts and cron;
 `--dry-run` bypasses prompts entirely because it writes nothing. A
 non-interactive stdin refuses rather than prompting: blocking would hang a
 script and defaulting to yes would delete data nobody agreed to.
@@ -160,8 +171,9 @@ the model gap reversibly in tags (collection ↔ slug tag, `toread`, `important`
 Scope with `--direction {both,to-pinboard,to-raindrop}` and
 `--collection`/`--rd-tag`/`--pb-tag`; scope limits what is written while matching
 uses the full sets (no re-import of an out-of-scope item already on the other
-side). `--dry-run` prints the plan. Delete propagation and conflict resolution
-are out of scope for this version.
+side). `--dry-run` prints the plan. `rd dupes` is the read-only companion
+report: URLs saved more than once within either service, with ids and titles.
+Delete propagation and conflict resolution are out of scope for this version.
 
 ## Error and retry behavior
 
@@ -169,10 +181,15 @@ are out of scope for this version.
   after retries are exhausted; other non-2xx → `APIError`. All carry the API's
   `errorMessage` when present.
 - `429` retries honor `Retry-After` (integer seconds or an HTTP-date) and
-  `X-RateLimit-Reset` (capped at 60s); `5xx` and transient transport errors
-  (including socket timeouts, which arrive bare on Python 3.10+) retry with
-  exponential backoff. Retries are bounded (`max_retries`, default 3). `4xx`
-  other than 429 is never retried.
+  `X-RateLimit-Reset` (capped at 60s) on both backends; `5xx` and transient
+  transport errors (timeouts, connection resets, truncated responses) retry
+  with exponential backoff. Retries are bounded (`max_retries`, default 3).
+  `4xx` other than 429 is never retried.
+- A request whose server-side outcome is unknowable is **never** retried on a
+  transport failure: creating raindrops (POST) and Pinboard writes fail
+  loudly instead, because a timed-out create may have landed and re-sending
+  it could double it. A 429/5xx response means the server answered, so those
+  still retry.
 - Request timeout defaults to 30s.
 
 ## Exit codes

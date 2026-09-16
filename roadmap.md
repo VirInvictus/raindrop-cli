@@ -111,12 +111,16 @@ the existing HTTP/output/config machinery.
       narrows what is written; matching uses the full sets (no re-import of an
       out-of-scope item that already exists on the other side).
 - [x] `--dry-run` plan preview; pure, unit-tested planner.
-- [x] Delete propagation + conflict resolution via a persistent manifest
-  *(CONFIRMED DEFERRED 2026-09-12 (Brandon): additive-first sync is the standing design; Pinboard deletes are permanent.)*
+- [ ] ~~Delete propagation + conflict resolution via a persistent manifest~~
+  *(CONFIRMED DEFERRED 2026-09-12 (Brandon): additive-first sync is the standing
+  design; Pinboard deletes are permanent. The box was wrongly ticked in the
+  meantime; unticked 2026-09-15 per the final audit, the feature is unbuilt.)*
       (three-way diff). Deferred: it needs stored sync state and carries real
       data-loss risk (Pinboard deletes are permanent).
 - [ ] A `--reconcile-dupes` pass that merges near-duplicate URLs *within* a
-      single service, not just across the two.
+      single service, not just across the two. *(Partially served 2026-09-15:
+      `rd dupes` ships as the read-only report of what would collapse; the
+      merge remains deliberately unbuilt.)*
 
 ## Considered, not committed
 
@@ -214,19 +218,109 @@ rd.json disposition: the file was deleted (never tracked) and `rd.json` now sits
   empty wiki is off.)*
 
 ### Final audit 2026-09-13 (THE FINAL AUDIT: NEW findings, one line each; full detail in audit-final/raindrop-cli/FINAL-REPORT.md)
-- [ ] MED — normalize_url crashes rd sync on a malformed/out-of-range port (urlsplit().port raises ValueError; one junk bookmark in either library = raw traceback; main() catches only RaindropError). Try/except, fall back to the raw URL as the match key.
-- [ ] MED — The retry family is incomplete: ConnectionResetError and http.client.IncompleteRead escape both retry cores AND main()'s handler (contradicts the spec's retry promise). Broaden to OSError + HTTPException — ideally inside the extracted shared transport core.
-- [ ] MED — The --json contract cluster: export/completion/config path silently ignore --json and emit non-JSON (plus bare `rd --json` prints human help); pre-flight guards and confirm-aborts emit human stderr with EMPTY stdout in JSON mode (realistic: agents run non-interactive); JSON-mode missing-object exits 0 vs human 1; id-mode rm emits a per-id map vs the spec's {"result": bool}. Emit documents, carve out export/completion, route errors JSON-aware, honor empty_code, fix the shape.
-- [ ] MED — Batch add silently ignores six single-add flags and --no-parse does the opposite (pleaseParse always {}). Honor per item or reject in batch mode; document whichever.
-- [ ] MED — perpage>50 silently truncates the iterators after page 1 (unclamped comparison vs the clamped fetch); clamp inside iter_raindrops/iter_highlights (fixes the doc advice too). Currently masked by CLI defaults.
-- [ ] MED — Release/publish automation: pin the floating pytest/ruff on the publish path and in CI (floors-only today); create the missing v0.5.2/v0.6.0 Releases (verbatim extraction; do NOT backfill pre-0.5.2); append a --notes-from-tag release step to publish.yml so future tags can't end up bare; bind the pypi environment to v* tags.
-- [ ] MED — pyproject/PyPI metadata: description and keywords omit pinboard + sync; classifiers empty; [project.urls] Homepage-only (add Changelog). Next release propagates.
-- [ ] LOW — Sync semantics: auto-retry on non-idempotent writes can double-create; in-scope duplicate of an out-of-scope-first URL never pushed; Pinboard ignores Retry-After (Raindrop honors); Raindrop's ISO-millis created passed verbatim as Pinboard's dt (silent re-date risk — normalize); --from 0 not rejected locally; saves carry the seed twice... (that last is Haveli) — raindrop: config tmp file world-readable for a moment vs its own comment.
-- [ ] LOW — Output polish: format_raindrop_detail passes raw API color names to color() so rd view highlight markers render colorless (route through _HL_CODES — also contradicts the "Fixed 0.6.0" tick, which landed in one of two paths); NO_COLOR="" disables colour (spec says unset); CJK width; multipart escaping; BrokenPipe shutdown noise; id-mode tag --clear unprompted; --perpage silently ignored with --all.
-- [ ] LOW — Comment truth: the dispatch-chokepoint comment undercounts the --json bypass map by five (11 sites in 10 commands); cli header omits --dry-run/--yes; last_update "(cheap, for sync)" unwired; pinboard docstring overstates the pacer; the duplicated retry comment (applied twice = the drift cost); apply_plan's vestigial dry_run; cmd_completion's why-line; dead re-check branch; iterator docstrings' perpage bound; _write_config_key scope.
-- [ ] LOW — Docs: 11 em-dashes against CLAUDE.md:121 (8 in the spec verb list — line 109 already models the colon fix; 2 CLAUDE; 1 historical roadmap); roadmap.md:114 ticked-but-CONFIRMED-DEFERRED box (untick); the auth table omits the legacy .env candidate; the exit-code paragraph omits code 2; spec omits rd completion; CLAUDE.md:8 cites the retired ~/.claude path + "Guidance for Claude Code" phrasing; CLAUDE.md:33's residual OAuth2 "yet"; patchnotes heading-style normalization; Contents skips Behavior notes; lowercase ### support; oceanstrip listed among living siblings; --version position claim; python -m rd_cli checkout claim; "same flags as list" nit; pb --tag max-3 unenforced; BrE/AmE mix.
-- [ ] LOW — Hygiene: .gitignore is the unpruned GitHub template (.env listed twice; latent lib//target//downloads traps) — prune to what can fire; tag_message.txt residue (delete; write scratch outside the repo); no .python-version (pin 3.11); no_sleep fixture orphaned; _CODES bold/dim dead; optional SECURITY.md.
-- [ ] Feature candidates logged (FINAL-REPORT L4, ranked): rd config check (attacks the thrice-shipped token-resolution failure class); highlights lane (list -c + source titles + markdown export sharing one join); sync fast-path via last_update + pb date filters (cron-grade sync); rd dupes (read-only); sync --limit N; backups download --latest; --collection accepts titles; apply_plan progress output; rd exists --exit-code; pinboard batch adds; rd context/--schema; --fields/--format (Phase 3 filler); config profiles (L, spec non-goal, parked); fzf picker (last).
-- [ ] Ledger decisions for Brandon: the unwired client methods are deliberate library-graduation surface (record the ledger or schedule wiring); dependabot opt-in; SECURITY.md; confirm SORTS' "-sort" against the live API docs.
+- [x] MED — normalize_url crashes rd sync on a malformed/out-of-range port (urlsplit().port raises ValueError; one junk bookmark in either library = raw traceback; main() catches only RaindropError). Try/except, fall back to the raw URL as the match key.
+- [x] MED — The retry family is incomplete: ConnectionResetError and http.client.IncompleteRead escape both retry cores AND main()'s handler (contradicts the spec's retry promise). Broaden to OSError + HTTPException — ideally inside the extracted shared transport core.
+- [x] MED — The --json contract cluster: export/completion/config path silently ignore --json and emit non-JSON (plus bare `rd --json` prints human help); pre-flight guards and confirm-aborts emit human stderr with EMPTY stdout in JSON mode (realistic: agents run non-interactive); JSON-mode missing-object exits 0 vs human 1; id-mode rm emits a per-id map vs the spec's {"result": bool}. Emit documents, carve out export/completion, route errors JSON-aware, honor empty_code, fix the shape.
+- [x] MED — Batch add silently ignores six single-add flags and --no-parse does the opposite (pleaseParse always {}). Honor per item or reject in batch mode; document whichever.
+- [x] MED — perpage>50 silently truncates the iterators after page 1 (unclamped comparison vs the clamped fetch); clamp inside iter_raindrops/iter_highlights (fixes the doc advice too). Currently masked by CLI defaults.
+- [x] MED — Release/publish automation: pin the floating pytest/ruff on the publish path and in CI (floors-only today); create the missing v0.5.2/v0.6.0 Releases (verbatim extraction; do NOT backfill pre-0.5.2); append a --notes-from-tag release step to publish.yml so future tags can't end up bare; bind the pypi environment to v* tags.
+- [x] MED — pyproject/PyPI metadata: description and keywords omit pinboard + sync; classifiers empty; [project.urls] Homepage-only (add Changelog). Next release propagates.
+- [x] LOW — Sync semantics: auto-retry on non-idempotent writes can double-create; in-scope duplicate of an out-of-scope-first URL never pushed; Pinboard ignores Retry-After (Raindrop honors); Raindrop's ISO-millis created passed verbatim as Pinboard's dt (silent re-date risk — normalize); --from 0 not rejected locally; saves carry the seed twice... (that last is Haveli) — raindrop: config tmp file world-readable for a moment vs its own comment.
+- [x] LOW — Output polish: format_raindrop_detail passes raw API color names to color() so rd view highlight markers render colorless (route through _HL_CODES — also contradicts the "Fixed 0.6.0" tick, which landed in one of two paths); NO_COLOR="" disables colour (spec says unset); CJK width; multipart escaping; BrokenPipe shutdown noise; id-mode tag --clear unprompted; --perpage silently ignored with --all. *(Shipped 0.7.0.)*
+- [x] LOW — Comment truth: the dispatch-chokepoint comment undercounts the --json bypass map by five (11 sites in 10 commands); cli header omits --dry-run/--yes; last_update "(cheap, for sync)" unwired; pinboard docstring overstates the pacer; the duplicated retry comment (applied twice = the drift cost); apply_plan's vestigial dry_run; cmd_completion's why-line; dead re-check branch; iterator docstrings' perpage bound; _write_config_key scope. *(Shipped 0.7.0 except the dead re-check branch, a gated removal; see the Final blitz section.)*
+- [x] LOW — Docs: 11 em-dashes against CLAUDE.md:121 (8 in the spec verb list — line 109 already models the colon fix; 2 CLAUDE; 1 historical roadmap); roadmap.md:114 ticked-but-CONFIRMED-DEFERRED box (untick); the auth table omits the legacy .env candidate; the exit-code paragraph omits code 2; spec omits rd completion; CLAUDE.md:8 cites the retired ~/.claude path + "Guidance for Claude Code" phrasing; CLAUDE.md:33's residual OAuth2 "yet"; patchnotes heading-style normalization; Contents skips Behavior notes; lowercase ### support; oceanstrip listed among living siblings; --version position claim; python -m rd_cli checkout claim; "same flags as list" nit; pb --tag max-3 unenforced; BrE/AmE mix. *(Shipped 0.7.0 except the BrE/AmE normalization, declined as a cosmetic sweep with high churn; see the Final blitz section.)*
+- [ ] LOW — Hygiene: .gitignore is the unpruned GitHub template (.env listed twice; latent lib//target//downloads traps) — prune to what can fire; tag_message.txt residue (delete; write scratch outside the repo); no .python-version (pin 3.11); no_sleep fixture orphaned; _CODES bold/dim dead; optional SECURITY.md. *(Not executed this window: every removal sub-item is a gated removal and the ask went unanswered, and SECURITY.md is gated; the .python-version pin was attempted and reverted because no 3.11 interpreter is installed locally and uv's Python downloads are manual, so the pin broke every `uv run`; the 3.11 floor is exercised by the CI matrix instead. See the Final blitz section.)*
+- [x] Feature candidates logged (FINAL-REPORT L4, ranked): rd config check (attacks the thrice-shipped token-resolution failure class); highlights lane (list -c + source titles + markdown export sharing one join); sync fast-path via last_update + pb date filters (cron-grade sync); rd dupes (read-only); sync --limit N; backups download --latest; --collection accepts titles; apply_plan progress output; rd exists --exit-code; pinboard batch adds; rd context/--schema; --fields/--format (Phase 3 filler); config profiles (L, spec non-goal, parked); fzf picker (last). *(Shipped 0.7.0: config check, the highlights lane, the pb date filters, dupes; the sync fast-path is recorded as design-blocked and the rest are parked with boxes; see the Final blitz section.)*
+- [x] Ledger decisions for Brandon: the unwired client methods are deliberate library-graduation surface (record the ledger or schedule wiring); dependabot opt-in; SECURITY.md; confirm SORTS' "-sort" against the live API docs. *(Asked 2026-09-15; the asks went unanswered at the gate, so the status quo is preserved and every item is listed as a reopen condition in the Final blitz section and project.done. The SORTS suspicion is additionally confirmed against the local official docs mirror: "-sort" appears in no documented sort value.)*
 
 **CONFIRMED-prior (final-audit verification):** perpage truncation, the retry family minus TimeoutError, batch-flag ignoring, _toml_line, NO_COLOR empty, CJK width, multipart escaping, BrokenPipe noise, the dead re-check, the ledger box, the OAuth2 partial. SUPERSEDED (verified fixed with tests): the sync --json HIGH, the dual-token HIGH, merge re-dating, hardcoded shared:true, ids+--from rejection, TimeoutError as such, the 0.6.1 docs sync, the alias closure. Audit-side corrections: the sheet's "3.14-only CI" and "142+ tests" are stale (3.11+3.14 matrix; 165 defs/171 collected). Slop-reader verdict: reads human end to end; 11 em-dashes confirmed exactly (10 live — the spec verb list already models its own fix at line 109); the BrE/AmE mix and the Contents gap are the stray notes.
+
+## Final blitz 2026-09-15 (executing the Final audit worklist; window closes 2026-09-20)
+
+### Shipped
+
+- [x] normalize_url crash guard: a malformed or out-of-range port falls back
+      to the raw URL as the match key; one junk bookmark no longer crashes
+      `rd sync` with a traceback. Regression-tested.
+- [x] Shared transport core (`_transport.py`): the retry loop, the
+      transient-error family (broadened to OSError + HTTPException so
+      ConnectionResetError and IncompleteRead retry), the Retry-After logic
+      (Pinboard now honors it too), and the error mapping live in one place.
+      Writes are never retried on transport failures (a timed-out POST can
+      double-create; it fails loudly instead).
+- [x] The --json contract cluster: export --json requires `-o` and emits a
+      metadata document; completion --json refuses; config path emits a
+      document; guards and confirm refusals emit `{"error"}` on stdout in
+      JSON mode; empty_code is honored in JSON mode; id-mode `rm` emits the
+      spec's `{"result": bool}`; main() catches OSError/JSONDecodeError at
+      the command boundary.
+- [x] Batch add rejects the five per-item value flags and honors --no-parse
+      (which used to do the opposite of its name in batch mode).
+- [x] perpage clamp inside iter_raindrops/iter_highlights; `--perpage` is now
+      honored with `--all`.
+- [x] Release/publish automation: pytest/ruff pinned in CI and publish;
+      publish.yml cuts the GitHub Release from the tag (--notes-from-tag,
+      contents:write scoped); the pypi environment is bound to `v*` tags;
+      Releases created for v0.5.2 and v0.6.0 (verbatim tag messages; nothing
+      pre-0.5.2 backfilled).
+- [x] pyproject metadata: description and keywords name Pinboard + sync;
+      classifiers added; Changelog URL added. Propagates to PyPI on the next
+      publish.
+- [x] `rd config check [--ping]`: which config file is in effect, which tier
+      each token resolves from (never the value), optional live ping.
+- [x] The highlights lane: `highlights list -c <collection>` (wires the idle
+      get_collection_highlights), source titles on highlight lines, and
+      `highlights export` (markdown grouped by source; --json = grouped doc).
+- [x] `rd pinboard list --from/--to` (Pinboard date filters on --all reads;
+      refused without --all since posts/recent has no date parameters).
+- [x] `rd dupes`: read-only per-service duplicate report (the planner's
+      collapse groups, with ids and titles).
+- [x] Sync semantics smalls: an in-scope duplicate is preferred as the
+      representative (an out-of-scope first sighting no longer blocks the
+      push); created stamps normalize to Pinboard's dt shape (millis
+      stripped, UTC Z); `--from 0` rejected locally; cmd_sync passes
+      --dry-run into both clients.
+- [x] Output polish: `rd view` highlight markers route through _HL_CODES
+      (they rendered colorless before); `NO_COLOR=""` counts as unset; CJK
+      wide characters count two columns; multipart filenames escape quotes
+      and line breaks; BrokenPipe shutdown is silent; id-mode `tag --clear`
+      now prompts like scope mode.
+- [x] Comment/docs truth batch: the chokepoint comment enumerates the
+      bespoke --json branches; the cli header lists all four common flags;
+      the pacer docstring no longer overclaims; apply_plan's dry-run claim
+      made true; completion's lazy import explained; the config writer skips
+      non-scalar keys with a warning (and creates the temp at 0600 from the
+      first byte); the em-dash sweep finished; the README/spec/CLAUDE doc
+      smalls (legacy .env row, exit code 2, completion in the verb list,
+      --version position, PYTHONPATH=src form, search-flags nit, pb --tag
+      wording, Contents and Support heading fixes, oceanstrip dropped, the
+      retired-path citation repointed); the Phase 6 wrongly-ticked box
+      unticked.
+
+### Parked (recorded; not built this window)
+
+- [ ] `rd sync --limit N`: gated (the flag's exact semantics are Brandon's
+      call). Leaned plan: N caps total applied writes across to_pinboard →
+      to_raindrop → merges in that order, plan order preserved.
+- [ ] Sync fast-path via last_update(): design-blocked. A safe fast-path
+      needs change detection on both sides plus stored state (the deferred
+      manifest); Pinboard date filters alone would narrow the READ set and
+      violate the no-re-import guarantee. Revisit only with the manifest.
+- [ ] `--collection` accepts titles: gated (flag shapes), recorded.
+- [ ] Feature backlog in recorded order: backups download --latest;
+      --collection titles; apply_plan progress output; rd exists
+      --exit-code; pinboard add --file/--stdin; rd context/--schema;
+      --fields/--format; config profiles (spec non-goal, parked); fzf
+      picker (parked).
+- [ ] SORTS cleanup: the official docs mirror (developer-site/v1) documents
+      `-created, created, score, n, title, -title, domain, -domain`; "-sort"
+      in cli.SORTS is confirmed bogus (likely a "-score" typo) but removing
+      it is gated on Brandon's live-docs confirm. The undocumented `n` (by
+      order) is also a candidate.
+- [ ] Ledger decisions (asked, awaiting answers): the unwired client methods
+      (expand_collections, get_user_by_name, parse_url, featured_covers,
+      upload_file, delete_collections, last_update) as deliberate
+      graduation surface vs wiring; dependabot opt-in; SECURITY.md; the
+      removal batch (tag_message.txt, the .gitignore prune, the no_sleep
+      fixture, the dead _CODES bold/dim entries, the dead re-check branch
+      in plan_sync). Status quo preserved until answered.

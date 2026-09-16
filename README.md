@@ -48,6 +48,7 @@ tags, and highlights from the terminal, with designed ANSI output for humans and
 - [System collection ids](#system-collection-ids)
 - [Rate limits and retries](#rate-limits-and-retries)
 - [Using raindrop-cli as a library](#using-raindrop-cli-as-a-library)
+- [Behavior notes](#behavior-notes)
 - [Development](#development)
 - [License](#license)
 
@@ -59,8 +60,14 @@ Requires Python 3.11 or newer (the floor for the standard-library `tomllib`).
 pipx install raindrop-cli
 ```
 
-After installation the `rd` command is on your `PATH`. You can also run it
-without installing via `python -m rd_cli` in a checkout.
+After installation the `rd` command is on your `PATH`. To run from a checkout
+without installing, use the src-layout path explicitly (the package is not
+importable from the checkout root):
+
+```bash
+uv run rd list            # recommended in a checkout
+PYTHONPATH=src python -m rd_cli list
+```
 
 ## Authentication
 
@@ -80,7 +87,7 @@ one found:
 | 1 | `RAINDROP_TOKEN` environment variable | Recommended for shells and CI. |
 | 2 | `RAINDROP_TEST_TOKEN` environment variable | Back-compat alias. |
 | 3 | `token` in `~/.config/raindrop-cli/config.toml` | Written by `rd config set-token`, `0600`. |
-| 4 | `RAINDROP_TOKEN` / `RAINDROP_TEST_TOKEN` in a `.env` file | `./.env`, then `~/.config/raindrop-cli/.env`. Real env vars always win. |
+| 4 | `RAINDROP_TOKEN` / `RAINDROP_TEST_TOKEN` in a `.env` file | `./.env`, then `~/.config/raindrop-cli/.env`, then the pre-rename `~/.config/rd-cli/.env`. Real env vars always win. |
 
 ```bash
 export RAINDROP_TOKEN=your-token-here       # option 1: environment
@@ -93,8 +100,11 @@ echo 'RAINDROP_TOKEN=your-token-here' > .env  # option 4: local .env
 **Upgrading from a pre-0.6 install?** The package was named `rd-cli` before
 September 2026, and the rename did not migrate configs. If
 `~/.config/raindrop-cli/config.toml` does not exist yet, your old
-`~/.config/rd-cli/config.toml` is read automatically; the first
-`rd config set-token` / `set-pinboard-token` copies every key to the new path.
+`~/.config/rd-cli/config.toml` is read automatically (and the old `rd-cli`
+`.env` is the last `.env` candidate); the first `rd config set-token` /
+`set-pinboard-token` copies every key to the new path. `rd config path` prints
+the file actually in effect, and `rd config check` names the tier each token
+resolved from.
 
 OAuth2 is not planned: the login flow and refresh machinery were retired
 (2026-09) because the test token does not expire and covers single-user use.
@@ -127,7 +137,7 @@ These work with any command and may appear **before or after** the subcommand
 | `--no-color` | Force plain text even on a TTY. |
 | `--dry-run` | Preview every **write**: log its method and payload to stderr and skip the API call. Reads still run, so you can plan a change safely first. |
 | `-y`, `--yes` | Answer every confirmation prompt with yes. See [Confirmation](#confirmation). |
-| `--version` | Print the version and exit. |
+| `--version` | Print the version and exit. (Root of the command only: `rd --version`, not `rd list --version`.) |
 | `-h`, `--help` | Show help for the program or any subcommand. |
 
 `--dry-run` is enforced in one place (the HTTP layer) for any non-GET request,
@@ -142,6 +152,7 @@ path stays quiet:
 | Asks | Why |
 | ---- | --- |
 | `rd rm --from`, `rd mv --from`, `rd tag --from --clear` | Scope mode matches an arbitrary number of raindrops. The prompt counts them first and tells you how many. |
+| `rd tag <id> --clear` | Destroys every tag on the item; there is no record of the prior tags to restore from. |
 | `rd rm --permanent` | Skips Trash. There is no undo. |
 | `rd collections rm` | Takes the collection's raindrops with it. |
 | `rd collections empty-trash`, `rd tags rm` | Unrecoverable, and afterwards there is no way to enumerate what was affected. |
@@ -172,7 +183,7 @@ any command. Grouped commands also have one-letter aliases: `c` for
 | Command | Description |
 | ------- | ----------- |
 | `rd list` | List raindrops. Flags: `-c/--collection <id>` (default `0` = all), `-s/--search <query>`, `--sort <key>`, `--page <n>`, `--perpage <n>` (max 50), `-a/--all` (fetch every page), `-n/--nested` (include nested collections), `-d/--detailed` (show excerpt, note, tags). |
-| `rd search <query>` | Shorthand for `list` with a positional search query. Same flags as `list`. |
+| `rd search <query>` | Shorthand for `list` with a positional search query. Same flags as `list` except `-s/--search` (the query is the positional argument instead). |
 | `rd view <id>` | Show one raindrop in full (link, domain, type, dates, collection, excerpt, note, tags, highlights). |
 | `rd open <ids...>` | Open raindrop(s) in your browser. `--cache` (alias `--permanent`) opens the archived permanent copy instead of the original link (PRO, and only some links are stored). `-p/--print` prints the URL and launches nothing, for SSH sessions and pipes. |
 | `rd add <url>` | Create a raindrop. Flags: `-t/--title`, `-c/--collection` (default `-1` = Unsorted), `--tags <t...>`, `--excerpt`, `--note`, `--important`, `--no-parse` (skip background metadata fetch), and `--file <path>` / `--stdin` for [bulk add](#bulk-operations-and-the-id-list-vs-scope-model). |
@@ -195,7 +206,11 @@ rd import pocket.html --create -c 12345      # import an export file
 ```
 
 `add` auto-parses page metadata (title, cover, type) in the background unless you
-pass `--no-parse`. When you supply only a URL, a title is fetched for you.
+pass `--no-parse`. When you supply only a URL, a title is fetched for you. In
+`--file`/`--stdin` batch mode the per-item flags (`--title`, `--tags`,
+`--excerpt`, `--note`, `--important`) are **rejected** with an error (one value
+cannot sensibly stamp a list of URLs; add such items individually); `--no-parse`
+is honored and applies to the whole batch.
 
 ### Bulk operations and the id-list vs scope model
 
@@ -241,7 +256,8 @@ Notes:
   specific tag from every raindrop, use `rd tags rm <tag>`.
 - Explicit ids and `--from` are mutually exclusive: the batch endpoints ignore
   an id list, so `rd rm 5 --from 111` would trash all of collection 111 and
-  never touch id 5. Passing both is rejected as a usage error.
+  never touch id 5. Passing both is rejected as a usage error, and so is
+  `--from 0` (the batch endpoints do not support the all-collection id).
 - `rm --permanent` deletes via the documented two-step (to Trash, then from
   Trash). Deleting a raindrop that is already in Trash also removes it
   permanently.
@@ -294,7 +310,8 @@ rd tags rm obsolete-tag
 
 | Command | Description |
 | ------- | ----------- |
-| `rd highlights list` | List highlights. `-r/--raindrop <id>` for one raindrop; otherwise all highlights, with `-a/--all`, `--page`, `--perpage`. |
+| `rd highlights list` | List highlights. `-r/--raindrop <id>` for one raindrop, `-c/--collection <id>` for one collection; otherwise all highlights, with `-a/--all`, `--page`, `--perpage`. Lines show the source title when the API provides one. |
+| `rd highlights export` | Export all highlights as Markdown, grouped by source raindrop, to stdout or `-o/--output <file>`. |
 | `rd highlights add <raindrop> <text>` | Add a highlight. `--color <name>`, `--note <text>`. |
 | `rd highlights edit <raindrop> <highlight>` | Edit a highlight. `--text`, `--color`, `--note`. |
 | `rd highlights rm <raindrop> <highlight>` | Remove a highlight. |
@@ -304,7 +321,9 @@ Colours: `blue`, `brown`, `cyan`, `gray`, `green`, `indigo`, `orange`, `pink`,
 
 ```bash
 rd highlights list -r 12345
+rd highlights list -c 111 --all
 rd highlights add 12345 "an important sentence" --color green --note "why"
+rd highlights export -o highlights.md
 ```
 
 ### Account
@@ -348,7 +367,7 @@ has Raindrop's collections. Needs a `PINBOARD_TOKEN` (see
 
 | Command | Description |
 | ------- | ----------- |
-| `rd pinboard list` | List bookmarks (recent by default). Flags: `--tag <t>` (repeatable, max 3), `--count <n>` (max 100), `-a/--all` (every bookmark), `--toread` (only unread), `-d/--detailed`. |
+| `rd pinboard list` | List bookmarks (recent by default). Flags: `--tag <t>` (repeatable; Pinboard accepts up to 3 per query), `--count <n>` (max 100), `-a/--all` (every bookmark), `--from`/`--to` (date filters, with `--all`), `--toread` (only unread), `-d/--detailed`. |
 | `rd pinboard get <url>` | Show one bookmark by its URL. |
 | `rd pinboard add <url>` | Add a bookmark. Flags: `-t/--title`, `--extended <note>`, `--tags <t...>`, `--toread`, `--shared`/`--private`, `--no-replace` (fail if the URL exists), `--dt <iso>`. |
 | `rd pinboard rm <url>` | Delete a bookmark. **Permanent; Pinboard has no trash.** |
@@ -394,10 +413,15 @@ Scope flags narrow what gets **written**, but matching always uses the full sets
 on both sides, so an out-of-scope bookmark that already exists on the other
 service is recognized and never re-imported as a duplicate.
 
+`rd dupes` is the read-only companion: it reports URLs saved more than once
+*within* each service (the groups the sync planner collapses), with ids and
+titles, and writes nothing.
+
 ```bash
 rd sync --dry-run                                       # preview the full union
 rd sync --dry-run --direction to-pinboard --collection 123   # just one collection, one way
 rd sync --direction to-raindrop --pb-tag toread         # pull only your Pinboard to-reads
+rd dupes                                                # what would collapse, on both sides
 ```
 
 Delete propagation and conflict resolution (which need a persistent sync
@@ -409,6 +433,7 @@ manifest) are intentionally not implemented yet; see `roadmap.md`.
 | ------- | ----------- |
 | `rd config path` | Print the config file path (the file actually in effect, including a pre-rename fallback). |
 | `rd config show` | Show config; tokens are masked in human **and** JSON mode. |
+| `rd config check` | Report which config file is in effect and which tier each token resolves from (environment, config.toml, or `.env`), never the value. `--ping` also calls each service's cheapest read to prove the tokens work. |
 | `rd config set-token <token>` | Store the Raindrop API token in `config.toml` (`0600`). |
 | `rd config set-pinboard-token <token>` | Store the Pinboard API token (`user:HEX`) in `config.toml` (`0600`). |
 
@@ -436,7 +461,19 @@ nothing else. Shapes:
   `collections view`).
 - Boolean/count commands emit a small object (`{"result": true}`,
   `{"modified": 3}`, `{"moved": 2, "collection": 999}`, ...).
-- Errors emit `{"error": "<message>"}` on stdout and still exit non-zero.
+- Errors emit `{"error": "<message>"}` on stdout and still exit non-zero. This
+  covers the API's typed errors *and* the command-level guards (missing
+  arguments, a refused confirmation, an unsupported flag combination), so a
+  parsing script never meets an empty stdout on a handled failure.
+- A missing object exits non-zero in JSON mode too (`rd view --json 999` emits
+  `{}` and exits 1, like the human mode).
+- Two commands are carved out because their product is not data: `export
+  --json` requires `-o` and emits a `{"path", "bytes", "format"}` document for
+  the written file (the export payload itself is raw CSV/HTML/ZIP bytes), and
+  `completion --json` refuses with an error document (a completion script is
+  shell code by definition).
+- `rd` with no subcommand prints the help text in both modes; there is no
+  command context for a document to describe.
 
 Objects are passed through from the API unchanged. Per Raindrop's own docs,
 responses may contain undocumented fields that are unsafe to rely on.
@@ -471,17 +508,25 @@ The Raindrop API allows 120 requests per minute per user. raindrop-cli retries
 automatically:
 
 - **429 (rate limited):** waits for the `Retry-After` header (integer seconds or
-  an HTTP-date) or `X-RateLimit-Reset`, capped at 60 seconds.
-- **5xx and transient network errors:** exponential backoff.
+  an HTTP-date) or `X-RateLimit-Reset`, capped at 60 seconds. Both services
+  honor the headers (Pinboard included).
+- **5xx and transient network errors** (connection reset, truncated response,
+  timeout): exponential backoff.
 - Retries are bounded (3 by default). Other `4xx` responses are not retried;
   their error message (the API's `errorMessage`) is surfaced to you.
+- **Writes are never retried on a network failure.** After a timeout, whether
+  the server applied the write is unknowable, and re-sending a create could
+  double it silently; a failed write therefore errors immediately and leaves
+  the retry decision to you. (A 429/5xx *response* means the server answered,
+  so those still retry.)
 
 Each request also has a 30-second timeout.
 
 ## Using raindrop-cli as a library
 
 The HTTP client is a clean, dependency-free class you can import directly. Every
-endpoint is one method, and all requests go through a single retrying core.
+endpoint is one method, and all requests go through a single retrying core
+(`rd_cli._transport`, shared with the Pinboard client).
 
 ```python
 from rd_cli.config import resolve_token
@@ -503,7 +548,7 @@ max_retries=3, dry_run=False, opener=None, sleep=time.sleep)`. The `opener` and
 ## Behavior notes
 
 - `rd open --json` resolves URLs and prints JSON only; it never launches a browser. Human mode (and `--print`) behave as before.
-- Sync preserves timestamps both ways: edits and merges on Pinboard keep the post's original save time, and raindrops pushed to Pinboard carry their Raindrop `created` stamp. The unread flag round-trips too: a Pinboard post marked *to-read* becomes a `toread` tag on the raindrop, and it comes back as unread.
+- Sync preserves timestamps both ways: edits and merges on Pinboard keep the post's original save time, and raindrops pushed to Pinboard carry their Raindrop `created` stamp normalized to Pinboard's documented `dt` shape (milliseconds stripped, timezone converted to UTC). The unread flag round-trips too: a Pinboard post marked *to-read* becomes a `toread` tag on the raindrop, and it comes back as unread.
 - Sync never forces visibility: a bookmark pushed to Pinboard omits the `shared` flag, so your Pinboard account's default privacy applies. A merge keeps the post's own `shared` value.
 - `rd filters` tolerates the API returning counts as bare integers or as `{"count": N}` objects.
 
@@ -524,9 +569,9 @@ changelog. The version lives in a single `VERSION` file.
 
 MIT. See `LICENSE`.
 
-### support
+### Support
 
-if any of this is useful to you and you'd like to chip in:
+If any of this is useful to you and you'd like to chip in:
 
 - liberapay · [liberapay.com/bdkl](https://liberapay.com/bdkl/)
 - bitcoin

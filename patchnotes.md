@@ -2,6 +2,102 @@
 
 Newest at the top.
 
+## v0.7.0 (2026-09-15)
+
+**The Final Blitz release: the 2026-09-13 final audit's worklist executed.
+One crash guard, a transport-core rebuild, the --json contract honored at
+every boundary, four new commands, and a round of promise-vs-reality
+repairs.** Suite: 209 passed, 1 skipped (was 170 passed, 1 skipped).
+
+*   **Fixed: one junk bookmark no longer crashes `rd sync`.**
+    `normalize_url` asked `urlsplit(url).port`, which raises on a malformed
+    or out-of-range port, so a single `https://example.com:99999/` bookmark
+    in either library took the whole sync down with a raw traceback. The key
+    now falls back to the raw URL when parsing fails; it still dedups
+    against itself.
+*   **The transport core is shared and the retry family is complete.** The
+    retry loop, the transient-error family, the Retry-After logic, and the
+    typed error mapping moved into `rd_cli._transport`, used verbatim by
+    both clients. The family broadened from `URLError`/`TimeoutError` to
+    `OSError` + `http.client.HTTPException`, so connection resets and
+    truncated responses now retry (and exit as typed errors when exhausted)
+    instead of escaping as tracebacks. Pinboard honors `Retry-After` too,
+    which the spec always promised.
+*   **Writes are never retried on a network failure.** After a timeout,
+    whether the server applied a write is unknowable, and re-sending a
+    create could double it silently. Creating raindrops (POST) and Pinboard
+    mutations now fail loudly instead; 429/5xx responses still retry, since
+    the server answered.
+*   **The `--json` single-document contract is honored at the failure
+    boundaries.** Pre-flight guards and confirmation refusals (including the
+    non-interactive refusal) emit `{"error": ...}` on stdout in JSON mode
+    instead of human stderr with an empty stdout; a missing object exits
+    non-zero in JSON mode like the human mode; `rd rm --json` emits the
+    spec's `{"result": bool}` instead of a per-id map. Three commands
+    silently ignoring `--json` were settled: `export --json` requires `-o`
+    and emits a `{"path", "bytes", "format"}` document for the written file;
+    `completion --json` refuses with an error document (a completion script
+    is shell code by definition); `rd config path --json` emits `{"path":
+    ...}`. A missing input file or a non-JSON 200 body is now a clean error,
+    never a traceback.
+*   **`rd config check [--ping]`.** Reports which config file is in effect
+    and which tier each token resolves from (environment and variable name,
+    config.toml, or `.env`) without ever printing a value; `--ping` proves
+    each token against the service's cheapest read. Three of this repo's
+    worst shipped bugs were silently-wrong token resolution; this turns the
+    class into a one-command diagnosis.
+*   **The highlights lane.** `rd highlights list -c <collection>` wires the
+    long-idle collection-highlights endpoint; highlight lines show the
+    source title the API already provides; and `rd highlights export [-o
+    file]` renders every highlight as Markdown grouped by source, the
+    surface no competing CLI covers.
+*   **`rd dupes`.** A read-only report of URLs saved more than once within
+    either service (the groups the sync planner collapses), with ids and
+    titles, so near-duplicates can be merged by hand.
+*   **`rd pinboard list --from/--to`** passes Pinboard's date filters
+    through on `--all` reads (and refuses without `--all`, since
+    posts/recent has no date parameters rather than silently doing nothing).
+*   **Fixed: batch add honors and rejects flags honestly.** `rd add
+    --file/--stdin` silently ignored the five per-item value flags while
+    `--no-parse` did the opposite of its name (batch items always requested
+    parsing). Batch mode now rejects `--title/--tags/--excerpt/--note/
+    --important` with a clear error and honors `--no-parse` as the
+    batch-wide knob.
+*   **Fixed: `--all` paginates correctly at any `--perpage`.** The iterators
+    compared page size against the unclamped value while the fetch clamped
+    to the API's 50, so `perpage > 50` truncated the walk after page 1.
+    `--perpage` is also no longer silently ignored with `--all`.
+*   **Sync semantics hardened.** An in-scope duplicate of an
+    out-of-scope-first URL is now the one that gets pushed; raindrop
+    `created` stamps are normalized to Pinboard's documented `dt` shape so a
+    rejected timestamp cannot silently re-date a push; `--from 0` is
+    rejected locally (the batch endpoints do not support it); and `rd sync
+    --dry-run` builds both clients with the dry-run flag, so the writes are
+    blocked twice.
+*   **Output truth.** `rd view` highlight markers route through the palette
+    map (raw API color names rendered them colorless); `NO_COLOR=""` counts
+    as unset per the standard; East Asian wide characters count two columns
+    in table alignment; multipart filenames escape quotes and line breaks;
+    a closed `| head` shuts down silently; and id-mode `rd tag --clear` now
+    asks before destroying tags, like scope mode always did.
+*   **Release/publish automation.** pytest and ruff are pinned in CI and on
+    the publish path (they floated before); publish.yml now cuts the GitHub
+    Release from the tag by construction; the `pypi` environment is bound to
+    `v*` tags; and the missing v0.5.2 and v0.6.0 Releases were created from
+    their verbatim tag messages (nothing older was backfilled).
+*   **PyPI metadata surfaces the differentiators.** The description and
+    keywords now name Pinboard and sync; classifiers and a Changelog URL
+    were added.
+*   **Docs, comments, and config-writer truth.** The config writer skips
+    non-scalar keys with a warning instead of corrupting them, and creates
+    its temp file `0600` from the first byte; the dispatch-chokepoint
+    comment enumerates every bespoke `--json` branch; several docstrings no
+    longer overclaim (the pacer, `last_update`'s caller, `apply_plan`'s
+    dry-run); the em-dash sweep finished across spec, README, and CLAUDE.md;
+    the README gained the legacy `.env` row, the `PYTHONPATH=src` form, and
+    the Behavior-notes TOC entry; and the roadmap's wrongly-ticked
+    delete-propagation box is unticked.
+
 ## v0.6.1 (2026-09-13)
 
 **The token fix that 0.6.0 never shipped, the config path the rename broke,
@@ -115,11 +211,12 @@ Suite: 144 passed, 1 skipped (was 127).
 ## v0.5.2 (2026-08-24)
 
 - **Build:** Replaced unittest with pytest in the CI workflow, restoring test coverage execution.
+
 ## v0.5.1 (2026-08-23)
 
-- **Build:** build: add GitHub Actions CI workflow
+- **Build:** added the GitHub Actions CI workflow.
 
-## 0.5.0
+## v0.5.0 (2026-08-09)
 
 ### Added
 
@@ -147,7 +244,7 @@ Suite: 144 passed, 1 skipped (was 127).
   really completes. The fish check skips where fish is not installed rather than
   pretending to pass.
 
-## 0.4.0
+## v0.4.0 (2026-08-08)
 
 ### Added
 
@@ -187,7 +284,7 @@ Suite: 144 passed, 1 skipped (was 127).
   documented to return a total, so a missing count produces "every raindrop in
   collection X" rather than a confidently wrong number.
 
-## 0.3.0
+## v0.3.0 (2026-07-18)
 
 ### Added
 
@@ -211,7 +308,7 @@ Suite: 144 passed, 1 skipped (was 127).
   writes nothing. The planning half (`sync.plan_sync` and the mapping helpers)
   is pure and covered by unit tests independent of the network.
 
-## 0.2.0
+## v0.2.0 (2026-07-18)
 
 ### Added
 
@@ -234,7 +331,7 @@ Suite: 144 passed, 1 skipped (was 127).
   fetch the bookmark, merge the change, and re-save with `replace=yes`, leaving
   untouched fields intact.
 
-## 0.1.1
+## v0.1.1 (2026-07-18)
 
 ### Fixed
 
@@ -244,7 +341,7 @@ Suite: 144 passed, 1 skipped (was 127).
   `<multipart ... files=[...]>` without dumping the raw file bytes. Extracted the
   logic into `_dry_run_preview` with direct unit coverage.
 
-## 0.1.0
+## v0.1.0 (2026-07-18)
 
 The framework rebuild. The barebones prototype became a dependency-free,
 tested, fully documented CLI.

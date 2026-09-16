@@ -33,7 +33,12 @@ jobs:
       contents: write # the release step cuts the GitHub Release from the tag
 
     steps:
+      # Full history: --notes-from-tag reads the annotated tag's message from
+      # the local git object, and a shallow checkout fetches no tags, which
+      # made gh fall back to the commit message (seen on the v0.7.0 release).
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"

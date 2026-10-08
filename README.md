@@ -1,3 +1,5 @@
+> **Status: complete and stable.** Bug reports welcome; feature development is closed.
+
 <p align="center">
   <img src="logo.svg" alt="raindrop-cli" width="96" height="96">
 </p>

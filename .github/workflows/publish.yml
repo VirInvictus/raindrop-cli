@@ -33,9 +33,10 @@ jobs:
       contents: write # the release step cuts the GitHub Release from the tag
 
     steps:
-      # Full history: --notes-from-tag reads the annotated tag's message from
-      # the local git object, and a shallow checkout fetches no tags, which
-      # made gh fall back to the commit message (seen on the v0.7.0 release).
+      # Full history so the local tag-object read below has the repo; gh's
+      # --notes-from-tag is NOT used: inside Actions it silently falls back
+      # to the commit message (seen on the v0.7.0 release; fleet-documented
+      # in Catagotchi issue #2).
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
@@ -52,10 +53,28 @@ jobs:
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # release/v1
 
+      # checkout rewrites refs/tags/vX to the resolved commit SHA even after
+      # a full fetch (deadbeef-cui v2.0.1 precedent), so the annotated object
+      # must be re-fetched --force right before it is read.
+      - name: Fetch the annotated tag object
+        env:
+          TAG: ${{ github.ref_name }}
+        run: git fetch --force origin "refs/tags/$TAG:refs/tags/$TAG"
+
       - name: Create the GitHub Release from the tag
-        # The annotated tag message is the verbatim patchnotes entry, so
-        # --notes-from-tag reproduces it by construction and future tags
-        # cannot end up bare of a Release.
-        run: gh release create "$GITHUB_REF_NAME" --verify-tag --notes-from-tag
+        # The annotated tag message is the verbatim patchnotes entry; it is
+        # read straight off the local tag object, and an unannotated tag
+        # fails the job instead of publishing a fallback body (Catagotchi
+        # issue #2's deterministic pattern, proven on v4.51.2).
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          OT="$(git for-each-ref "refs/tags/$TAG" --format='%(objecttype)')"
+          if [ "$OT" != "tag" ]; then
+            echo "::error::tag $TAG is $OT, not an annotated tag; the verbatim patchnotes entry is unavailable"
+            exit 1
+          fi
+          git for-each-ref "refs/tags/$TAG" --format='%(contents)' > /tmp/release-notes.md
+          TITLE="$(head -1 /tmp/release-notes.md)"
+          gh release create "$TAG" --verify-tag --notes-file /tmp/release-notes.md --title "$TITLE"
